@@ -1,0 +1,36 @@
+# Build outputs
+[Bb]uild/
+[Bb]uild-*/     # per-preset CMake dirs: build-local, build-android-<abi>, build-win-<arch>
+[Oo]ut/
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa]rm64/
+[Ll]inux/
+native/bin/
+native/runtimes/**/*.dll
+native/runtimes/**/*.so
+native/runtimes/**/*.dylib
+!native/runtimes/**/.gitkeep
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Portable tools fetched by the build scripts
+.tools/
+
+# OS
+.DS_Store
+Thumbs.db

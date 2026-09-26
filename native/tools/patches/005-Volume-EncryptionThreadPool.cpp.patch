@@ -1,0 +1,11 @@
+--- a/Volume/EncryptionThreadPool.cpp
++++ b/Volume/EncryptionThreadPool.cpp
+@@ -180,7 +180,7 @@
+ 
+ 		unique_ptr <Exception> itemException;
+ 		if (firstFragmentWorkItem->ItemException.get())
+-			itemException = move_ptr(firstFragmentWorkItem->ItemException);
++			itemException = std::move (firstFragmentWorkItem->ItemException);	// PORT: move_ptr macro is MSVC-hostile
+ 
+ 		firstFragmentWorkItem->State.Set (WorkItem::State::Free);
+ 		WorkItemCompletedEvent.Signal();

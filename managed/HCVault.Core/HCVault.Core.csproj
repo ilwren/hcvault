@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- net8.0 (LTS) is the minimum; net10.0 gets the newest BCL/interp path -->
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- NuGet packaging (source-only: build offline, then `dotnet pack`) -->
+    <PackageId>HCVault.Core</PackageId>
+    <Version>1.4.0</Version>
+    <Authors>HCVault</Authors>
+    <Description>
+      Managed wrapper around the VeraCrypt volume core: create, open, read and write
+      VeraCrypt encrypted containers (normal and hidden volumes, all cipher/KDF
+      combinations, keyfiles, PIM) without mounting them. Reference the
+      HCVault.Native package for the prebuilt native libraries (or build them
+      from the repository sources with CMake).
+    </Description>
+    <PackageTags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2</PackageTags>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/hcvault/hcvault</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>nuget-icon.png</PackageIcon>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <PackAsTool>false</PackAsTool>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="nuget-icon.png" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <!--
+    The native library is a peer package (HCVault.Native). We intentionally do
+    NOT hard-reference it here so this package stays dependency-free; at runtime
+    the loader probes (in order):
+      1. $VCNATIVE_HOME (directory or full library path)
+      2. the application directory
+      3. the application directory's runtimes/{rid}/native
+      4. native/runtimes/{rid}/native up to 6 levels above the app (repo layout)
+      5. the default OS probing (covers NuGet-provided native assets)
+  -->
+
+</Project>

@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HCVault.AndroidDemo</RootNamespace>
+    <AssemblyName>HCVault.AndroidDemo</AssemblyName>
+    <ApplicationId>net.hcvault.androiddemo</ApplicationId>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      Plain .NET Android shell (NO MAUI) so the volume core can be exercised
+      on Android 5.0 (API 21)+, including the API 21-23 range that MAUI 10
+      does not support (MAUI requires API 24+). Same HCVault.Core API and
+      the same native libhcvault-core.so as the MAUI demo.
+    -->
+    <SupportedOSPlatformVersion>21.0</SupportedOSPlatformVersion>
+    <TargetPlatformMinVersion>21.0</TargetPlatformMinVersion>
+
+    <!-- No RuntimeIdentifiers on purpose: a plain build produces the default
+         APK (arm64-v8a + x86_64, the .NET Android default); dotnet publish
+         -r android-<abi> builds a per-ABI APK with only that ABI's runtime
+         and hcvault-core; pass -p:RuntimeIdentifiers=... explicitly for a
+         4-ABI universal APK. -->
+
+    <!-- keep the build light: no trimming/AOT/marshal-method rewriting -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <AndroidEnableMarshalMethods>false</AndroidEnableMarshalMethods>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\managed\HCVault.Core\HCVault.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\shared\VolumeDemo.cs" Link="VolumeDemo.cs" />
+  </ItemGroup>
+
+  <!--
+    The native library is packaged into the APK. Build it first:
+
+        .\build.ps1 -Android          (Windows)
+        ./build.sh (android mode)     (Linux/macOS)
+
+    It lands in native/runtimes/android-*/native/libhcvault-core.so.
+    At runtime HCVault.Core resolves it through the Android default
+    probing (lib/<abi>/libhcvault-core.so inside the APK).
+  -->
+  <ItemGroup>
+    <!-- All four ABIs are declared; a RID-specific build (dotnet publish -r android-arm64)
+         packs only that ABI into the APK, a plain build produces the universal APK. -->
+    <AndroidNativeLibrary Include="..\..\native\runtimes\android-arm64\native\libhcvault-core.so" Abi="arm64-v8a"
+                          Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'android-arm64'" />
+    <AndroidNativeLibrary Include="..\..\native\runtimes\android-arm\native\libhcvault-core.so" Abi="armeabi-v7a"
+                          Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'android-arm'" />
+    <AndroidNativeLibrary Include="..\..\native\runtimes\android-x64\native\libhcvault-core.so" Abi="x86_64"
+                          Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'android-x64'" />
+    <AndroidNativeLibrary Include="..\..\native\runtimes\android-x86\native\libhcvault-core.so" Abi="x86"
+                          Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'android-x86'" />
+  </ItemGroup>
+
+  <!-- fail fast with actionable guidance when the .so files have not been built -->
+  <Target Name="VerifyHcVaultNativeLibraries" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('..\..\native\runtimes\android-arm64\native\libhcvault-core.so')"
+           Text="libhcvault-core.so was not found under native\runtimes\android-*.&#10;Build the native library first:  .\build.ps1 -Android  (Windows)  /  ./build.sh --android  (Linux, macOS)" />
+  </Target>
+
+</Project>

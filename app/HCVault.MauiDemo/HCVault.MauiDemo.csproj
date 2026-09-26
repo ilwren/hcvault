@@ -1,0 +1,95 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>HCVault.MauiDemo</RootNamespace>
+    <AssemblyName>HCVault.MauiDemo</AssemblyName>
+    <ApplicationId>net.hcvault.mauidemo</ApplicationId>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <ApplicationVersion>1</ApplicationVersion>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      MAUI 10 runs on Android 7.0+. For Android 5.0/6.x (API 21-23) use the
+      plain-Android twin app/HCVault.AndroidDemo instead — the native
+      libhcvault-core itself is built for API 21 (native/CMakePresets.json).
+    -->
+    <SupportedOSPlatformVersion>24.0</SupportedOSPlatformVersion>
+    <TargetPlatformMinVersion>24.0</TargetPlatformMinVersion>
+
+    <!-- No RuntimeIdentifiers on purpose: a plain build produces the default
+         APK (arm64-v8a + x86_64, the .NET Android default); dotnet publish
+         -r android-<abi> builds a per-ABI APK with only that ABI's runtime
+         and hcvault-core; pass -p:RuntimeIdentifiers=... explicitly for a
+         4-ABI universal APK. -->
+
+    <!-- MAUI 10 NuGet package version (env-defined on machines with the maui
+         workload; pinned fallback otherwise) -->
+    <MauiVersion Condition="'$(MauiVersion)' == ''">10.0.100</MauiVersion>
+
+    <!-- trimming/AOT are unnecessary for a demo and those steps can exceed 2 GB
+         of RAM on small build machines; the app is small either way -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <RunAOTCompilation>false</RunAOTCompilation>
+    <!-- marshal-method rewriting is another RAM-hungry Cecil pass; disable it
+         so the demo also builds on small CI machines -->
+    <AndroidEnableMarshalMethods>false</AndroidEnableMarshalMethods>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+    <PackageReference Include="Microsoft.Maui.Essentials" Version="$(MauiVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\managed\HCVault.Core\HCVault.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- UI-framework-neutral demo driver, shared with the plain Android demo
+         (app/HCVault.AndroidDemo) which covers API 21-23 where MAUI 10
+         cannot run -->
+    <Compile Include="..\shared\VolumeDemo.cs" Link="VolumeDemo.cs" />
+  </ItemGroup>
+
+  <!--
+    The native library is packaged into the APK. Build it first:
+
+        .\build.ps1 -Android          (Windows)
+        ./build.sh (android mode)     (Linux/macOS)
+
+    It lands in native/runtimes/android-*/native/libhcvault-core.so.
+    At runtime HCVault.Core resolves it through the Android default
+    probing (lib/<abi>/libhcvault-core.so inside the APK).
+  -->
+  <ItemGroup>
+    <!-- All four ABIs are declared; a RID-specific build (dotnet publish -r android-arm64)
+         packs only that ABI into the APK, a plain build produces the universal APK. -->
+    <AndroidNativeLibrary Include="..\..\native\runtimes\android-arm64\native\libhcvault-core.so" Abi="arm64-v8a"
+                          Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'android-arm64'" />
+    <AndroidNativeLibrary Include="..\..\native\runtimes\android-arm\native\libhcvault-core.so" Abi="armeabi-v7a"
+                          Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'android-arm'" />
+    <AndroidNativeLibrary Include="..\..\native\runtimes\android-x64\native\libhcvault-core.so" Abi="x86_64"
+                          Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'android-x64'" />
+    <AndroidNativeLibrary Include="..\..\native\runtimes\android-x86\native\libhcvault-core.so" Abi="x86"
+                          Condition="'$(RuntimeIdentifier)' == '' or '$(RuntimeIdentifier)' == 'android-x86'" />
+  </ItemGroup>
+
+  <!-- fail fast with actionable guidance when the .so files have not been built -->
+  <Target Name="VerifyHcVaultNativeLibraries" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('..\..\native\runtimes\android-arm64\native\libhcvault-core.so')"
+           Text="libhcvault-core.so was not found under native\runtimes\android-*.&#10;Build the native library first:  .\build.ps1 -Android  (Windows)  /  ./build.sh --android  (Linux, macOS)" />
+  </Target>
+
+  <ItemGroup>
+    <MauiIcon Include="Resources\AppIcon\appicon.svg" ForegroundFile="Resources\AppIcon\appiconfg.svg" ForegroundScale="0.65" Color="#1B1B2F" />
+    <MauiSplashScreen Include="Resources\Splash\splash.svg" Color="#1B1B2F" BaseSize="128,128" />
+  </ItemGroup>
+
+</Project>

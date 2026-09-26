@@ -1,0 +1,41 @@
+--- a/Core/RandomNumberGenerator.cpp
++++ b/Core/RandomNumberGenerator.cpp
+@@ -22,6 +22,10 @@
+ #endif
+ 
+ #include "RandomNumberGenerator.h"
++#ifdef TC_WINDOWS
++#	include <windows.h>
++#	include <bcrypt.h>
++#endif
+ #include "Volume/Crc32.h"
+ 
+ namespace VeraCrypt
+@@ -31,9 +35,24 @@
+ 		SecureBuffer buffer (PoolSize);
+ 
+ #ifdef TC_WINDOWS
+-#ifndef DEBUG
+-		throw NotImplemented (SRC_POS);
+-#endif
++		/* PORT (see port notes): use the system CNG RNG (BCryptGenRandom with the
++		   system-preferred provider; Vista+). /dev/urandom does not exist on Windows. */
++		NTSTATUS bcryptStatus = BCryptGenRandom (nullptr, buffer, (ULONG) buffer.Size(), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
++		throw_sys_sub_if (!BCRYPT_SUCCESS (bcryptStatus), L"BCryptGenRandom");
++		AddToPool (buffer);
++
++		if (!fast)
++		{
++			/* use JitterEntropy library to get good quality random bytes based on CPU timing jitter */
++			if (JitterRngCtx)
++			{
++				ssize_t rndLen = jent_read_entropy (JitterRngCtx, (char*) buffer.Ptr(), buffer.Size());
++				if (rndLen > 0)
++				{
++					AddToPool (buffer);
++				}
++			}
++		}
+ #else
+ 		int urandom = open ("/dev/urandom", O_RDONLY);
+ 		throw_sys_sub_if (urandom == -1, L"/dev/urandom");

@@ -1,0 +1,138 @@
+name: build-demos
+
+# Builds the demo applications and the HCVault.Native NuGet package:
+#   - HCVault.Explorer     WPF (Windows)
+#   - HCVault.MauiDemo     .NET MAUI, Android — one APK per ABI
+#   - HCVault.AndroidDemo  plain .NET Android (API 21+), universal APK
+#   - HCVault.Native       NuGet package with the prebuilt native libraries
+#                          (Windows x64/x86/ARM64, Android 4 ABIs from this job;
+#                           linux-x64 built by the native-linux job below)
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  wpf:
+    name: WPF demo (HCVault.Explorer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build
+        run: dotnet build app/HCVault.Explorer -c Release
+
+  native-linux:
+    name: native + managed tests (linux-x64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      # builds hcvault-core (linux-x64), then runs the managed test suite
+      # once per target framework (net8.0 + net10.0)
+      - name: Build + test
+        run: bash ./build.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-linux-x64
+          path: native/runtimes/linux-x64/native/
+
+  android:
+    name: Android demos (MAUI per-ABI APKs + API 21 demo)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Android SDK (sdkmanager on PATH, ANDROID_HOME set if not present)
+      - uses: android-actions/setup-android@v3
+
+      # NDK r27c -> ANDROID_NDK_HOME (used by the CMake presets)
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r27c
+          add-to-path: false
+
+      - name: Build native library (4 ABIs)
+        run: .\build.ps1 -Android -SkipManaged -NoDownload
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+
+      - name: Install MAUI workload
+        run: dotnet workload install maui-android
+
+      - name: Publish MAUI demo (one APK per ABI)
+        run: |
+          foreach ($rid in 'android-arm64','android-x64','android-arm','android-x86') {
+            dotnet publish app/HCVault.MauiDemo -c Release -r $rid
+            if ($LASTEXITCODE) { exit 1 }
+          }
+
+      - name: Build plain Android demo (universal APK, Android 5.0+)
+        run: dotnet build app/HCVault.AndroidDemo -c Release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: maui-apks
+          path: app/HCVault.MauiDemo/bin/Release/net10.0-android/*/publish/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: androiddemo-apk
+          path: app/HCVault.AndroidDemo/bin/Release/net10.0-android/*-Signed.apk
+
+  package:
+    name: NuGet package (HCVault.Native)
+    needs: native-linux
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # linux-x64 .so built by the native-linux job
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x64
+          path: native/runtimes/linux-x64/native/
+
+      # Android SDK + NDK for the 4 Android ABIs
+      - uses: android-actions/setup-android@v3
+
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r27c
+          add-to-path: false
+
+      - name: Build native libraries (Windows x64/x86/ARM64 + Android 4 ABIs)
+        run: .\build.ps1 -Arch All -Android -SkipManaged -NoDownload
+        env:
+          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+
+      - name: Pack
+        run: dotnet pack native/HCVault.Native.pack.csproj -c Release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nuget-package
+          path: native/bin/Release/*.nupkg

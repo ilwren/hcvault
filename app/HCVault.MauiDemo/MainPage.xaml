@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="HCVault.MauiDemo.MainPage"
+             BackgroundColor="{StaticResource PageBackground}">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="16,14" Spacing="12">
+
+            <Label Text="HCVault · Android demo"
+                   FontSize="22" FontAttributes="Bold" />
+            <Label x:Name="DeviceLabel" FontSize="12" TextColor="{StaticResource DimText}" />
+
+            <!-- ============================== scripted -->
+            <Frame>
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Full self-test" FontAttributes="Bold" />
+                    <Label Text="create → wrong password rejected → open → mount → write → read back → list → delete → reopen"
+                           FontSize="11" TextColor="{StaticResource DimText}" />
+
+                    <Picker x:Name="FsPicker" Title="Filesystem" SelectedIndex="0">
+                        <Picker.ItemsSource>
+                            <x:Array Type="{x:Type x:String}">
+                                <x:String>exFAT</x:String>
+                                <x:String>FAT</x:String>
+                                <x:String>None (raw)</x:String>
+                            </x:Array>
+                        </Picker.ItemsSource>
+                    </Picker>
+                    <Picker x:Name="SizePicker" Title="Volume size" SelectedIndex="1">
+                        <Picker.ItemsSource>
+                            <x:Array Type="{x:Type x:String}">
+                                <x:String>8 MiB</x:String>
+                                <x:String>16 MiB</x:String>
+                                <x:String>64 MiB</x:String>
+                                <x:String>256 MiB</x:String>
+                            </x:Array>
+                        </Picker.ItemsSource>
+                    </Picker>
+                    <Entry x:Name="PasswordEntry" IsPassword="True"
+                           Text="demo-passw0rd!" Placeholder="Password" />
+                    <Button x:Name="RunButton" Text="Run full test"
+                            SemanticProperties.Hint="Runs the complete volume lifecycle test" />
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- ================================ manual -->
+            <Frame>
+                <VerticalStackLayout Spacing="10">
+                    <Label Text="Manual mode" FontAttributes="Bold" />
+                    <Label x:Name="VolumeStateLabel" FontSize="11"
+                           TextColor="{StaticResource DimText}"
+                           LineBreakMode="CharacterWrap" />
+
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                        <Button Grid.Column="0" x:Name="CreateButton" Text="Create" />
+                        <Button Grid.Column="1" x:Name="OpenButton" Text="Open" />
+                        <Button Grid.Column="2" x:Name="CloseButton" Text="Close" />
+                    </Grid>
+
+                    <Grid ColumnDefinitions="2*,*" ColumnSpacing="8">
+                        <Entry Grid.Column="0" x:Name="FileNameEntry" Text="hello.txt"
+                               Placeholder="File name inside the volume" />
+                        <Picker Grid.Column="1" x:Name="FileSizePicker" Title="Size" SelectedIndex="1">
+                            <Picker.ItemsSource>
+                                <x:Array Type="{x:Type x:String}">
+                                    <x:String>1 KiB</x:String>
+                                    <x:String>10 KiB</x:String>
+                                    <x:String>100 KiB</x:String>
+                                    <x:String>1 MiB</x:String>
+                                </x:Array>
+                            </Picker.ItemsSource>
+                        </Picker>
+                    </Grid>
+
+                    <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                        <Button Grid.Column="0" x:Name="WriteButton" Text="Write" />
+                        <Button Grid.Column="1" x:Name="ReadButton" Text="Read" />
+                        <Button Grid.Column="2" x:Name="DeleteButton" Text="Delete" />
+                    </Grid>
+
+                    <Button x:Name="RefreshButton" Text="Refresh file list" />
+
+                    <CollectionView x:Name="FilesView" HeightRequest="160" EmptyView="Volume not mounted.">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <Label Text="{Binding .}" FontSize="13" FontFamily="monospace"
+                                       Padding="4,2" />
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </VerticalStackLayout>
+            </Frame>
+
+            <!-- ==================================== log -->
+            <Label Text="Log" FontAttributes="Bold" />
+            <Frame Padding="8">
+                <CollectionView x:Name="LogView" HeightRequest="260">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate x:DataType="x:String">
+                            <Label Text="{Binding .}" FontSize="11" FontFamily="monospace"
+                                   LineBreakMode="CharacterWrap" Padding="2,1" />
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
+            </Frame>
+
+        </VerticalStackLayout>
+    </ScrollView>
+</ContentPage>

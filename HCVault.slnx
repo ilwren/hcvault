@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/app/">
+    <Project Path="app/HCVault.Explorer/HCVault.Explorer.csproj" />
+    <Project Path="app/HCVault.MauiDemo/HCVault.MauiDemo.csproj" />
+    <Project Path="app/HCVault.AndroidDemo/HCVault.AndroidDemo.csproj" />
+  </Folder>
+  <Folder Name="/managed/">
+    <Project Path="managed/HCVault.Core/HCVault.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/HCVault.Core.Tests/HCVault.Core.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,30 @@
+--- a/Platform/File.h
++++ b/Platform/File.h
+@@ -49,13 +49,15 @@
+ 		};
+ 
+ #ifdef TC_WINDOWS
+-		typedef FILE* SystemFileHandleType;
++		typedef void* SystemFileHandleType;   // PORT: Win32 HANDLE (see port/File.cpp)
+ #else
+ 		typedef int SystemFileHandleType;
+ #endif
+ 
+ 		File () : FileIsOpen (false), mFileOpenFlags (FlagsNone), SharedHandle (false), FileHandle (0)
+-#ifndef TC_WINDOWS
++#ifdef TC_WINDOWS
++				,AccTime(0), ModTime (0), SeekPosition (0)
++#else
+ 				,AccTime(0), ModTime (0)
+ #endif
+ 		 { }
+@@ -105,6 +107,9 @@
+ 		SystemFileHandleType FileHandle;
+ 
+ #ifdef TC_WINDOWS
++		uint64 AccTime;              // PORT: FILETIME (see port/File.cpp)
++		uint64 ModTime;              // PORT: FILETIME
++		mutable uint64 SeekPosition; // PORT: emulated file position for sequential I/O
+ #else
+ 		time_t AccTime;
+ 		time_t ModTime;
