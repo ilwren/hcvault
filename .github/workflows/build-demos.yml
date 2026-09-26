@@ -60,8 +60,22 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # Android SDK (sdkmanager on PATH, ANDROID_HOME set if not present)
-      - uses: android-actions/setup-android@v3
+      # The GitHub Windows runners already ship the Android SDK
+      # (C:\Android\android-sdk); export its location for the NDK setup and
+      # the builds. (android-actions/setup-android can no longer be used: it
+      # insists on installing the legacy 'tools' package, which Google removed
+      # from the SDK repository, so every run fails.)
+      - name: Android SDK environment
+        shell: pwsh
+        run: |
+          $sdk = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, 'C:\Android\android-sdk') |
+              Where-Object { $_ -and (Test-Path (Join-Path $_ 'platform-tools')) } |
+              Select-Object -First 1
+          if (-not $sdk) { throw 'Android SDK not found (looked at ANDROID_HOME, ANDROID_SDK_ROOT, C:\Android\android-sdk)' }
+          Add-Content $env:GITHUB_ENV "ANDROID_HOME=$sdk"
+          Add-Content $env:GITHUB_ENV "ANDROID_SDK_ROOT=$sdk"
+          Write-Host "Android SDK: $sdk"
+          Write-Host ('contents: ' + ((Get-ChildItem $sdk -Name) -join ', '))
 
       # NDK r27c -> ANDROID_NDK_HOME (used by the CMake presets)
       - uses: nttld/setup-ndk@v1
@@ -115,8 +129,22 @@ jobs:
           name: native-linux-x64
           path: native/runtimes/linux-x64/native/
 
-      # Android SDK + NDK for the 4 Android ABIs
-      - uses: android-actions/setup-android@v3
+      # The GitHub Windows runners already ship the Android SDK
+      # (C:\Android\android-sdk); export its location for the NDK setup and
+      # the builds. (android-actions/setup-android can no longer be used: it
+      # insists on installing the legacy 'tools' package, which Google removed
+      # from the SDK repository, so every run fails.)
+      - name: Android SDK environment
+        shell: pwsh
+        run: |
+          $sdk = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, 'C:\Android\android-sdk') |
+              Where-Object { $_ -and (Test-Path (Join-Path $_ 'platform-tools')) } |
+              Select-Object -First 1
+          if (-not $sdk) { throw 'Android SDK not found (looked at ANDROID_HOME, ANDROID_SDK_ROOT, C:\Android\android-sdk)' }
+          Add-Content $env:GITHUB_ENV "ANDROID_HOME=$sdk"
+          Add-Content $env:GITHUB_ENV "ANDROID_SDK_ROOT=$sdk"
+          Write-Host "Android SDK: $sdk"
+          Write-Host ('contents: ' + ((Get-ChildItem $sdk -Name) -join ', '))
 
       - uses: nttld/setup-ndk@v1
         id: ndk
