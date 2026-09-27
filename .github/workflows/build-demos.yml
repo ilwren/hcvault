@@ -30,11 +30,18 @@ on:
         required: true
         type: string
 
+# a newer push/PR cancels the superseded run (saves queue + build time);
+# manual release runs are never cancelled by anything
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
 jobs:
   wpf:
     name: WPF demo (HCVault.Explorer)
     if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +71,7 @@ jobs:
   native-linux:
     name: native + managed tests (linux-x64)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -89,12 +97,20 @@ jobs:
     name: Android demos (MAUI per-ABI APKs + API 21 demo)
     if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      # NuGet package cache: the MAUI/Android closure is large; this makes
+      # restore near-instant on warm runs (keyed on the project files).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('app/**/*.csproj', 'managed/**/*.csproj') }}
 
       # The GitHub Windows runners already ship the Android SDK
       # (C:\Android\android-sdk); export its location for the NDK setup and
@@ -125,6 +141,13 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
 
+      # the 4 Android libraries, shared with the package job below (it does
+      # not have an NDK and does not rebuild them)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-android
+          path: native/runtimes/android-*/native/libhcvault-core.so
+
       - name: Install MAUI workload
         run: dotnet workload install maui-android
 
@@ -151,8 +174,9 @@ jobs:
   package:
     name: NuGet package (HCVault.Native)
     if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
-    needs: native-linux
+    needs: [native-linux, android]     # android supplies the 4 Android .so below
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -160,39 +184,27 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # NuGet package cache: the MAUI/Android closure is large; this makes
+      # restore near-instant on warm runs (keyed on the project files).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('app/**/*.csproj', 'managed/**/*.csproj') }}
+
       # linux-x64 .so built by the native-linux job
       - uses: actions/download-artifact@v4
         with:
           name: native-linux-x64
           path: native/runtimes/linux-x64/native/
 
-      # The GitHub Windows runners already ship the Android SDK
-      # (C:\Android\android-sdk); export its location for the NDK setup and
-      # the builds. (android-actions/setup-android can no longer be used: it
-      # insists on installing the legacy 'tools' package, which Google removed
-      # from the SDK repository, so every run fails.)
-      - name: Android SDK environment
-        shell: pwsh
-        run: |
-          $sdk = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, 'C:\Android\android-sdk') |
-              Where-Object { $_ -and (Test-Path (Join-Path $_ 'platform-tools')) } |
-              Select-Object -First 1
-          if (-not $sdk) { throw 'Android SDK not found (looked at ANDROID_HOME, ANDROID_SDK_ROOT, C:\Android\android-sdk)' }
-          Add-Content $env:GITHUB_ENV "ANDROID_HOME=$sdk"
-          Add-Content $env:GITHUB_ENV "ANDROID_SDK_ROOT=$sdk"
-          Write-Host "Android SDK: $sdk"
-          Write-Host ('contents: ' + ((Get-ChildItem $sdk -Name) -join ', '))
-
-      - uses: nttld/setup-ndk@v1
-        id: ndk
+      # the 4 Android .so built by the android job (shared, not rebuilt here)
+      - uses: actions/download-artifact@v4
         with:
-          ndk-version: r27c
-          add-to-path: false
+          name: native-android
+          path: native/runtimes/
 
-      - name: Build native libraries (Windows x64/x86/ARM64 + Android 4 ABIs)
-        run: .\build.ps1 -Arch All -Android -SkipManaged -NoDownload
-        env:
-          ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+      - name: Build native libraries (Windows x64/x86/ARM64)
+        run: .\build.ps1 -Arch All -SkipManaged -NoDownload
 
       - name: Pack (both NuGet packages)
         run: |
@@ -211,6 +223,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     needs: [wpf, native-linux, android, package]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write        # create the release and upload its assets
     steps:
