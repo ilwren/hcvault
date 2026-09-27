@@ -1,16 +1,20 @@
 name: build-demos
 
 # Builds the demo applications and the HCVault.Native NuGet package:
-#   - HCVault.Explorer     WPF (Windows)
+#   - HCVault.Explorer     WPF (Windows), published as a framework-dependent zip
 #   - HCVault.MauiDemo     .NET MAUI, Android — one APK per ABI
 #   - HCVault.AndroidDemo  plain .NET Android (API 21+), universal APK
 #   - HCVault.Native       NuGet package with the prebuilt native libraries
 #                          (Windows x64/x86/ARM64, Android 4 ABIs from this job;
 #                           linux-x64 built by the native-linux job below)
+#
+# Pushing a version tag (v1.4.0 ...) additionally publishes a GitHub Release
+# with all built binaries (see the release job at the bottom).
 
 on:
   push:
     branches: [ main, master ]
+    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
 
@@ -25,8 +29,24 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Build
-        run: dotnet build app/HCVault.Explorer -c Release
+      # the demo loads hcvault-core.dll at runtime - build it so the zip
+      # contains everything needed to run (the loader finds it next to the exe)
+      - name: Build native library (win-x64)
+        run: .\build.ps1 -Arch x64 -SkipManaged -NoDownload
+
+      - name: Publish WPF demo (framework-dependent)
+        run: |
+          dotnet publish app/HCVault.Explorer -c Release -o publish\wpf
+          if ($LASTEXITCODE) { exit 1 }
+          Copy-Item native\runtimes\win-x64\native\hcvault-core.dll publish\wpf\
+
+      - name: Package zip
+        run: Compress-Archive -Path publish\wpf\* -DestinationPath HCVault.Explorer-win-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wpf-demo
+          path: HCVault.Explorer-win-x64.zip
 
   native-linux:
     name: native + managed tests (linux-x64)
@@ -157,10 +177,77 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
 
-      - name: Pack
-        run: dotnet pack native/HCVault.Native.pack.csproj -c Release
+      - name: Pack (both NuGet packages)
+        run: |
+          dotnet pack native/HCVault.Native.pack.csproj -c Release
+          dotnet pack managed/HCVault.Core -c Release
 
       - uses: actions/upload-artifact@v4
         with:
           name: nuget-package
-          path: native/bin/Release/*.nupkg
+          path: |
+            native/bin/Release/*.nupkg
+            managed/HCVault.Core/bin/Release/*.nupkg
+
+  release:
+    name: GitHub Release (v* tags)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [wpf, native-linux, android, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # create the release and upload its assets
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts    # one subfolder per artifact name
+
+      # download-artifact keeps each artifact in its own subfolder; nested
+      # paths are preserved below the least common ancestor of the upload,
+      # so everything is located with find instead of hardcoded paths.
+      - name: Collect release assets
+        run: |
+          set -e
+          mkdir release
+          cp artifacts/wpf-demo/HCVault.Explorer-win-x64.zip release/
+
+          # MAUI APKs: one per ABI, renamed after their RID folders
+          find artifacts/maui-apks -name '*.apk' | while read -r apk; do
+            abi=$(printf '%s' "$apk" | grep -oE 'android-(arm64|arm|x64|x86)' | head -n1)
+            cp "$apk" "release/HCVault.MauiDemo-$abi.apk"
+          done
+
+          # plain .NET Android demo: universal APK (all 4 ABIs, API 21+)
+          find artifacts/androiddemo-apk -name '*-Signed.apk' \
+              -exec cp {} release/HCVault.AndroidDemo-universal.apk \;
+
+          # NuGet packages (HCVault.Native + HCVault.Core)
+          find artifacts/nuget-package -name '*.nupkg' -exec cp {} release/ \;
+
+          # fail loudly instead of shipping a partial release
+          for f in HCVault.Explorer-win-x64.zip \
+                   HCVault.MauiDemo-android-arm64.apk \
+                   HCVault.MauiDemo-android-arm.apk \
+                   HCVault.MauiDemo-android-x64.apk \
+                   HCVault.MauiDemo-android-x86.apk \
+                   HCVault.AndroidDemo-universal.apk; do
+            [ -f "release/$f" ] || { echo "missing release asset: $f"; exit 1; }
+          done
+          nupkgs=$(find release -maxdepth 1 -name '*.nupkg' | wc -l)
+          [ "$nupkgs" -ge 2 ] || { echo "expected 2 NuGet packages, found $nupkgs"; exit 1; }
+
+          echo '--- release assets ---'
+          ls -la release/
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag"; then
+            echo "release $tag already exists - replacing its assets"
+            gh release upload "$tag" release/* --clobber
+          else
+            gh release create "$tag" release/* --title "$tag" --generate-notes
+          fi
