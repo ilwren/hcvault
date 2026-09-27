@@ -1,26 +1,39 @@
 name: build-demos
 
-# Builds the demo applications and the HCVault.Native NuGet package:
-#   - HCVault.Explorer     WPF (Windows), published as a framework-dependent zip
+# Two modes:
+#   push / pull request  - automated tests only: the Linux job builds
+#                          hcvault-core and runs the managed test suite once
+#                          per target framework (net8.0 + net10.0). Nothing
+#                          is published.
+#   manual run           - full release build, published as a GitHub Release:
+#     (Actions tab ->      Actions -> build-demos -> Run workflow -> enter
+#      "Run workflow")     the version tag, e.g. v1.4.0 (must match the
+#                          version in the project files).
+#
+# Release contents:
+#   - HCVault.Explorer     WPF (Windows), framework-dependent zip
 #   - HCVault.MauiDemo     .NET MAUI, Android — one APK per ABI
 #   - HCVault.AndroidDemo  plain .NET Android (API 21+), universal APK
 #   - HCVault.Native       NuGet package with the prebuilt native libraries
-#                          (Windows x64/x86/ARM64, Android 4 ABIs from this job;
-#                           linux-x64 built by the native-linux job below)
-#
-# Pushing a version tag (v1.4.0 ...) additionally publishes a GitHub Release
-# with all built binaries (see the release job at the bottom).
+#                          (Windows x64/x86/ARM64, Android 4 ABIs; linux-x64
+#                           built by the native-linux job)
+#   - HCVault.Core         managed wrapper NuGet package
 
 on:
   push:
     branches: [ main, master ]
-    tags: [ 'v*' ]
   pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version tag (e.g. v1.4.0) - must match the version in the project files'
+        required: true
+        type: string
 
 jobs:
   wpf:
     name: WPF demo (HCVault.Explorer)
+    if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,13 +78,16 @@ jobs:
       - name: Build + test
         run: bash ./build.sh
 
+      # the .so is only needed when a release is being assembled
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: native-linux-x64
           path: native/runtimes/linux-x64/native/
 
   android:
     name: Android demos (MAUI per-ABI APKs + API 21 demo)
+    if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -134,6 +150,7 @@ jobs:
 
   package:
     name: NuGet package (HCVault.Native)
+    if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
     needs: native-linux
     runs-on: windows-latest
     steps:
@@ -190,8 +207,8 @@ jobs:
             managed/HCVault.Core/bin/Release/*.nupkg
 
   release:
-    name: GitHub Release (v* tags)
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: GitHub Release
+    if: github.event_name == 'workflow_dispatch'
     needs: [wpf, native-linux, android, package]
     runs-on: ubuntu-latest
     permissions:
@@ -242,12 +259,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.version }}
         run: |
           set -e
-          tag="$GITHUB_REF_NAME"
+          tag="$RELEASE_TAG"
+
+          # sanity: well-formed tag, e.g. v1.4.0 or v1.4.0-beta.1
+          printf '%s' "$tag" | grep -Eq '^v[0-9]+(\.[0-9]+)*(-[A-Za-z0-9.]+)?$' \
+              || { echo "invalid tag '$tag' (expected e.g. v1.4.0)"; exit 1; }
+
+          # the tag must match the version the packages were built from -
+          # a v1.5.0 release containing 1.4.0 packages would be confusing
+          core_pkg=$(find artifacts/nuget-package -name 'HCVault.Core.*.nupkg' | head -n1)
+          native_pkg=$(find artifacts/nuget-package -name 'HCVault.Native.*.nupkg' | head -n1)
+          core_ver=$(basename "$core_pkg" .nupkg); core_ver=${core_ver#HCVault.Core.}
+          native_ver=$(basename "$native_pkg" .nupkg); native_ver=${native_ver#HCVault.Native.}
+          [ "$core_ver" = "$native_ver" ] \
+              || { echo "package version mismatch: HCVault.Core $core_ver vs HCVault.Native $native_ver"; exit 1; }
+          [ "$tag" = "v$core_ver" ] \
+              || { echo "tag $tag does not match the built package version v$core_ver - bump the versions in the project files, or dispatch with v$core_ver"; exit 1; }
+
           if gh release view "$tag"; then
             echo "release $tag already exists - replacing its assets"
             gh release upload "$tag" release/* --clobber
           else
-            gh release create "$tag" release/* --title "$tag" --generate-notes
+            gh release create "$tag" release/* --title "$tag" --target "$GITHUB_SHA" --generate-notes
           fi
