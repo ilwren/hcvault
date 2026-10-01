@@ -18,6 +18,7 @@ The pure-py3-none-any wheel can always be built explicitly with:
     python -m build --no-isolation   # after clearing native/runtimes
 """
 
+import os
 import re
 import shutil
 import subprocess
@@ -33,33 +34,71 @@ NATIVE_RUNTIMES = HERE.parent / "native" / "runtimes"
 BINARIES_DIR = HERE / "src" / "hcvault" / "_binaries"
 
 
+# platform tag per Windows RID; Linux tags are derived from the .so's symbol
+# versions, macOS from sysconfig
+_WINDOWS_TAG = {"win-x64": "win_amd64", "win-x86": "win32", "win-arm64": "win_arm64"}
+# ELF architecture name per Linux RID suffix (wheel tags use these)
+_LINUX_ARCH = {"x64": "x86_64", "arm64": "aarch64", "arm": "armv7l", "x86": "i686"}
+
+
+def _forced_rid():
+    """$HCVAULT_WHEEL_RID overrides the RID (cross-arch wheels: the win-x86
+    and win-arm64 wheels are built on an x64 CI runner - the bundled library
+    is never loaded during the build, so the machine need not match). The
+    override must belong to the build OS family."""
+    rid = os.environ.get("HCVAULT_WHEEL_RID")
+    if not rid:
+        return None
+    prefix = {"win32": "win-", "darwin": "osx-", "linux": "linux-"}.get(sys.platform)
+    if prefix is None or not rid.startswith(prefix):
+        wanted = prefix or "an OS-matching"
+        raise SystemExit(
+            f"hcvault: HCVAULT_WHEEL_RID={rid} does not match this build OS "
+            f"(expected a {wanted}* RID)"
+        )
+    return rid
+
+
 def _rid_and_lib():
-    """(runtime identifier, library file name) for the build machine."""
+    """(runtime identifier, library file name); $HCVAULT_WHEEL_RID wins."""
     import platform
 
+    forced = _forced_rid()
     if sys.platform == "win32":
         machine = platform.machine().lower()
         if machine == "arm64":
-            return "win-arm64", "hcvault-core.dll"
-        return ("win-x86", "hcvault-core.dll") if sys.maxsize <= 2**32 else ("win-x64", "hcvault-core.dll")
+            rid = "win-arm64"
+        elif sys.maxsize <= 2**32:
+            rid = "win-x86"
+        else:
+            rid = "win-x64"
+        rid = forced or rid
+        if rid not in _WINDOWS_TAG:
+            raise SystemExit(f"hcvault: unknown Windows RID: {rid}")
+        return rid, "hcvault-core.dll"
     if sys.platform == "darwin":
         machine = platform.machine().lower()
-        return ("osx-arm64", "libhcvault-core.dylib") if machine == "arm64" else ("osx-x64", "libhcvault-core.dylib")
+        rid = forced or ("osx-arm64" if machine == "arm64" else "osx-x64")
+        return rid, "libhcvault-core.dylib"
     machine = platform.machine().lower()
     machine_map = {
         "x86_64": "linux-x64", "amd64": "linux-x64", "aarch64": "linux-arm64",
         "armv8l": "linux-arm64", "armv7l": "linux-arm", "armv6l": "linux-arm",
         "i386": "linux-x86", "i686": "linux-x86",
     }
-    rid = machine_map.get(machine, "linux-x64" if sys.maxsize > 2**32 else "linux-x86")
+    rid = forced or machine_map.get(machine, "linux-x64" if sys.maxsize > 2**32 else "linux-x86")
+    if rid.rsplit("-", 1)[-1] not in _LINUX_ARCH:
+        raise SystemExit(f"hcvault: unknown Linux RID: {rid}")
     return rid, "libhcvault-core.so"
 
 
-def _linux_tag(lib: Path) -> str:
-    """manylinux_<glibc>_<arch> from the maximum GLIBC symbol version."""
-    arch = {"x86_64": "x86_64", "aarch64": "aarch64", "armv7l": "armv7l", "i686": "i686"}[
-        platform_machine()
-    ]
+def _linux_tag(lib: Path, rid: str) -> str:
+    """manylinux_<glibc>_<arch> from the maximum GLIBC symbol version.
+
+    The architecture comes from the RID (not from the build machine), so a
+    cross-arch override produces the correct tag.
+    """
+    arch = _LINUX_ARCH[rid.rsplit("-", 1)[-1]]
     try:
         out = subprocess.run(
             ["objdump", "-T", str(lib)],
@@ -82,12 +121,6 @@ def _linux_tag(lib: Path) -> str:
     if (major, minor) < (2, 28):
         major, minor = 2, 28
     return f"manylinux_{major}_{minor}_{arch}"
-
-
-def platform_machine():
-    import platform
-
-    return platform.machine().lower()
 
 
 class bdist_wheel(_bdist_wheel):
@@ -122,9 +155,11 @@ class bdist_wheel(_bdist_wheel):
         tag = list(super().get_tag())
         rid = getattr(self, "hcvault_bundled_rid", None)
         if rid:
-            if rid.startswith("linux-"):
-                tag[2] = _linux_tag(self.hcvault_bundled_lib)
-            else:
+            if rid.startswith("win-"):
+                tag[2] = _WINDOWS_TAG[rid]
+            elif rid.startswith("linux-"):
+                tag[2] = _linux_tag(self.hcvault_bundled_lib, rid)
+            else:  # osx-*
                 tag[2] = sysconfig.get_platform().replace("-", "_").replace(".", "_")
             print(f"hcvault: wheel platform tag: {tag[2]}")
         return tuple(tag)

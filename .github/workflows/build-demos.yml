@@ -18,8 +18,9 @@ name: build-demos
 #                          (Windows x64/x86/ARM64, Android 4 ABIs; linux-x64
 #                           built by the native-linux job)
 #   - HCVault.Core         managed wrapper NuGet package
-#   - hcvault              Python wheel (pure-ctypes wrapper; linux-x64
-#                          native library bundled; not published to PyPI)
+#   - hcvault              Python wheels (pure-ctypes wrapper; linux-x64,
+#                          Windows x64/x86/ARM64 and macOS arm64 (best
+#                          effort) native libraries bundled; not on PyPI)
 
 on:
   push:
@@ -186,7 +187,7 @@ jobs:
           name: androiddemo-apk
           path: app/HCVault.AndroidDemo/bin/Release/net10.0-android/*-Signed.apk
 
-  python-wheel:
+  python-wheel-linux:
     name: Python wheel (linux-x64)
     if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
     needs: [native-linux]     # supplies the linux-x64 .so bundled into the wheel
@@ -205,31 +206,94 @@ jobs:
       - name: Build wheel
         run: python3 -m pip wheel python/ -w wheelhouse/ --no-deps
 
-      # prove the wheel is self-contained: install into a clean venv and
-      # create + mount a volume from outside the repository
-      - name: Smoke test (install into a venv)
+      # prove the wheel is self-contained: install into a clean venv and run
+      # the smoke test from outside the repository
+      - name: Smoke test (clean venv)
         run: |
           python3 -m venv /tmp/hcvenv
           /tmp/hcvenv/bin/pip install wheelhouse/*.whl
           cd /tmp
-          /tmp/hcvenv/bin/python - <<'EOF'
-          import os, tempfile
-          import hcvault
-          from hcvault import SecurePassword, Volume, VcFilesystem, ExFatFileSystem
-          with tempfile.TemporaryDirectory() as d:
-              p = os.path.join(d, "smoke.hc")
-              with SecurePassword.from_str("ci-smoke-test") as pw:
-                  Volume.create(p, 8 * 1024 * 1024, pw, filesystem=VcFilesystem.EXFAT)
-              with SecurePassword.from_str("ci-smoke-test") as pw, \
-                      Volume.open(p, pw) as vol, ExFatFileSystem.mount(vol) as fs:
-                  fs.write_file("/hello.txt", b"bundled wheel works")
-                  assert fs.read_file("/hello.txt") == b"bundled wheel works"
-          print("wheel smoke test passed: hcvault", hcvault.__version__)
-          EOF
+          /tmp/hcvenv/bin/python "$GITHUB_WORKSPACE/python/tests/smoke_wheel.py"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: python-wheel
+          name: python-wheel-linux
+          path: wheelhouse/*.whl
+
+  python-wheel-windows:
+    name: Python wheels (Windows x64 / x86 / ARM64)
+    if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build native libraries (x64 + x86 + ARM64)
+        run: .\build.ps1 -Arch All -SkipManaged -NoDownload
+
+      # the runner is x64, so the plain build bundles win-x64; the other two
+      # architectures are selected with HCVAULT_WHEEL_RID (the bundled DLL is
+      # never loaded during the build, so cross-arch wheels are safe)
+      - name: Build wheels (win_amd64 + win32 + win_arm64)
+        run: |
+          python -m pip wheel python/ -w wheelhouse/ --no-deps
+          $env:HCVAULT_WHEEL_RID = 'win-x86'
+          python -m pip wheel python/ -w wheelhouse/ --no-deps
+          $env:HCVAULT_WHEEL_RID = 'win-arm64'
+          python -m pip wheel python/ -w wheelhouse/ --no-deps
+          Get-ChildItem wheelhouse/ | Select-Object -ExpandProperty Name
+
+      # the x64 wheel installs on this runner - prove it end to end
+      - name: Smoke test (x64 wheel, clean venv)
+        run: |
+          python -m venv $env:TEMP\hcvenv
+          & $env:TEMP\hcvenv\Scripts\python.exe -m pip install (Get-Item wheelhouse\*win_amd64.whl).FullName
+          Set-Location $env:TEMP
+          & $env:TEMP\hcvenv\Scripts\python.exe "$env:GITHUB_WORKSPACE\python\tests\smoke_wheel.py"
+
+      # pip refuses to install the win32 / win_arm64 wheels on this runner
+      # (tag mismatch), so verify each bundled DLL's PE machine code against
+      # the tag promised by the wheel filename instead
+      - name: Verify cross-arch wheels (PE machine vs tag)
+        run: python python/tests/check_wheel_arch.py wheelhouse/*.whl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-windows
+          path: wheelhouse/*.whl
+
+  python-wheel-macos:
+    name: Python wheel (macos-arm64, best effort)
+    if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
+    runs-on: macos-latest
+    timeout-minutes: 30
+    # the macOS native library builds on the POSIX base but is otherwise
+    # untested - a failure here must not block the release (it ships without
+    # a macOS wheel that time; the smoke test below gates what does ship)
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # VC_RID must be passed explicitly: the CMake RID inference has no
+      # Darwin branch and would otherwise file the library under linux-arm64
+      - name: Build native library (osx-arm64)
+        run: |
+          cmake -S native -B build-local -D CMAKE_BUILD_TYPE=Release -D VC_RID=osx-arm64
+          cmake --build build-local --parallel 3
+
+      - name: Build wheel
+        run: python3 -m pip wheel python/ -w wheelhouse/ --no-deps
+
+      - name: Smoke test (clean venv)
+        run: |
+          python3 -m venv /tmp/hcvenv
+          /tmp/hcvenv/bin/pip install wheelhouse/*.whl
+          cd /tmp
+          /tmp/hcvenv/bin/python "$GITHUB_WORKSPACE/python/tests/smoke_wheel.py"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-macos
           path: wheelhouse/*.whl
 
   package:
@@ -282,7 +346,7 @@ jobs:
   release:
     name: GitHub Release
     if: github.event_name == 'workflow_dispatch'
-    needs: [wpf, native-linux, android, package, python-wheel]
+    needs: [wpf, native-linux, android, package, python-wheel-linux, python-wheel-windows, python-wheel-macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -314,9 +378,15 @@ jobs:
           # NuGet packages (HCVault.Native + HCVault.Core)
           find artifacts/nuget-package -name '*.nupkg' -exec cp {} release/ \;
 
-          # Python wheel (hcvault, linux-x64 library bundled)
-          find artifacts/python-wheel -name 'hcvault-*.whl' -exec cp {} release/ \
-              || { echo "missing release asset: hcvault wheel"; exit 1; }
+          # Python wheels: linux-x64 + Windows x64/x86/ARM64 are required;
+          # macOS arm64 is best effort (its native library is untested and
+          # the wheel job is allowed to fail without blocking the release)
+          cp artifacts/python-wheel-linux/hcvault-*.whl release/ \
+              || { echo "missing release asset: linux python wheel"; exit 1; }
+          cp artifacts/python-wheel-windows/hcvault-*.whl release/ \
+              || { echo "missing release asset: windows python wheels"; exit 1; }
+          cp artifacts/python-wheel-macos/hcvault-*.whl release/ 2>/dev/null \
+              || echo "note: no macOS python wheel this run (best-effort job)"
 
           # fail loudly instead of shipping a partial release
           for f in HCVault.Explorer-win-x64.zip \
@@ -357,11 +427,18 @@ jobs:
           [ "$tag" = "v$core_ver" ] \
               || { echo "tag $tag does not match the built package version v$core_ver - bump the versions in the project files, or dispatch with v$core_ver"; exit 1; }
 
-          # the Python wheel must carry the same version as the packages
-          whl=$(find release -maxdepth 1 -name 'hcvault-*.whl' | head -n1)
-          whl_ver=$(basename "$whl" | sed -E 's/^hcvault-([^-]+)-.*/\1/')
-          [ "$whl_ver" = "$core_ver" ] \
-              || { echo "python wheel version $whl_ver does not match the package version $core_ver"; exit 1; }
+          # every Python wheel must carry the same version as the packages
+          # (linux + 3 Windows wheels are hard-required; macOS is optional)
+          whl_count=0
+          for whl in release/hcvault-*.whl; do
+              [ -f "$whl" ] || continue
+              whl_count=$((whl_count + 1))
+              whl_ver=$(basename "$whl" | sed -E 's/^hcvault-([^-]+)-.*/\1/')
+              [ "$whl_ver" = "$core_ver" ] \
+                  || { echo "python wheel version $whl_ver does not match the package version $core_ver ($whl)"; exit 1; }
+          done
+          [ "$whl_count" -ge 4 ] \
+              || { echo "expected at least 4 python wheels (linux + 3 windows), found $whl_count"; exit 1; }
 
           if gh release view "$tag"; then
             echo "release $tag already exists - replacing its assets"

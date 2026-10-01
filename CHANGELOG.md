@@ -13,8 +13,12 @@ follows semantic versioning.
   (list, read, write, mkdir, delete, stat, space), and password/KDF
   rotation. Tests mirror the C# suite (21 checks, including FAT through the
   FatFs bridge, which the C# suite does not cover); CI runs them on every
-  push and builds a linux-x64 wheel (native library bundled, manylinux tag
-  derived from the .so's symbol versions) for GitHub Releases. Not on PyPI.
+  push and builds wheels for GitHub Releases: linux-x64 (manylinux tag
+  derived from the .so's symbol versions), Windows x64/x86/ARM64 (cross-arch
+  via HCVAULT_WHEEL_RID, each bundled DLL's PE architecture verified against
+  the wheel tag) and macOS arm64 (best effort - its native library is
+  otherwise untested, and a failed macOS build does not block a release).
+  Not on PyPI.
 
 - **New: free-space API.** `vc_exfat_get_space` (vcapi v4 — 35 exported
   functions) reports the total / free / cluster bytes of a mounted exFAT

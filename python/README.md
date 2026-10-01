@@ -17,8 +17,10 @@ produced with AI assistance and **not** security-audited. See the
 
 ## Installation
 
-Install the wheel from the GitHub Releases page (it bundles the native
-library; the CI-built one is linux-x64, glibc 2.34+):
+Install the wheel from the GitHub Releases page - it bundles the native
+library. CI-built wheels cover linux-x64 (glibc 2.34+), Windows
+x64 / x86 / ARM64 and macOS arm64 (best effort: the macOS native library
+is otherwise untested - a wheel only ships after its smoke test passes):
 
 ```bash
 pip install hcvault-1.4.0-py3-none-manylinux_2_34_x86_64.whl
@@ -110,5 +112,9 @@ native library, build it first (e.g. `cmake -S native -B build && cmake
 --build build` puts it in `native/runtimes/<rid>/native/`), then
 `pip wheel python/`. On Linux the wheel tag (`manylinux_2_XX_x86_64`) is
 derived from the glibc symbol versions the `.so` actually requires.
+Cross-arch wheels: set `HCVAULT_WHEEL_RID` (e.g. `win-x86`) to bundle a
+library for another architecture of the same OS - the library is never
+loaded during the build. On macOS, pass `-D VC_RID=osx-arm64` to CMake
+(the RID inference has no Darwin branch).
 
 Not on PyPI (yet); get the wheel from GitHub Releases.

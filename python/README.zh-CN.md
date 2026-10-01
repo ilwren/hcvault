@@ -15,8 +15,9 @@ VeraCrypt 程序中打开，反之亦然。
 
 ## 安装
 
-从 GitHub Releases 下载 wheel 安装（内含原生库；CI 构建的为 linux-x64，
-glibc 2.34+）：
+从 GitHub Releases 下载 wheel 安装——内含原生库。CI 构建的覆盖
+linux-x64（glibc 2.34+）、Windows x64 / x86 / ARM64 与 macOS arm64
+（尽力构建：macOS 原生库未经测试——wheel 只有通过冒烟测试才会发布）：
 
 ```bash
 pip install hcvault-1.4.0-py3-none-manylinux_2_34_x86_64.whl
@@ -97,5 +98,8 @@ python tests/run_tests.py     # 在 python/ 目录下运行
 `cmake -S native -B build && cmake --build build` 会放到
 `native/runtimes/<rid>/native/`），再 `pip wheel python/`。Linux 上 wheel
 标签（`manylinux_2_XX_x86_64`）由 `.so` 实际依赖的 glibc 符号版本推得。
+跨架构 wheel：设置 `HCVAULT_WHEEL_RID`（如 `win-x86`）可为同一系统的
+其他架构捆绑库——构建过程中不会加载该库。macOS 上给 CMake 传
+`-D VC_RID=osx-arm64`（RID 推断没有 Darwin 分支）。
 
 尚未上 PyPI；wheel 从 GitHub Releases 获取。

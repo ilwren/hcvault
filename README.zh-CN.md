@@ -179,7 +179,8 @@ Python 封装一遍）：
 （如 `v1.4.0`，需与项目内的版本号一致）。该次运行会构建全部平台，并把
 编译产物附到 GitHub Release：WPF 演示的依赖框架 zip（需 .NET 10 运行时）、
 MAUI 演示的逐 ABI APK、Android 5.0 通用演示 APK、两个 NuGet 包，以及
-Python wheel（linux-x64，内含原生库）。
+Python wheel（linux-x64、Windows x64/x86/ARM64、macOS arm64 尽力构建；
+内含原生库）。
 
 Android 演示 APK：直接构建得到默认包（arm64-v8a + x86_64）；
 `dotnet publish -c Release -r android-arm64`（还有 `-arm`/`-x64`/`-x86`）

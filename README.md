@@ -199,8 +199,8 @@ enter the version tag (e.g. `v1.4.0`, must match the project version).
 That run builds every platform and attaches the binaries to a GitHub
 Release: the WPF demo as a framework-dependent zip (needs the .NET 10
 runtime), one APK per ABI for the MAUI demo, the universal Android 5.0
-demo APK, both NuGet packages, and the Python wheel (linux-x64, native
-library bundled).
+demo APK, both NuGet packages, and the Python wheels (linux-x64, Windows
+x64/x86/ARM64, macOS arm64 best-effort; native library bundled).
 
 Android demo APKs: a plain build produces the default package (arm64-v8a +
 x86_64); `dotnet publish -c Release -r android-arm64` (also `-arm`/`-x64`/
