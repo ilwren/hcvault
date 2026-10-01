@@ -6,6 +6,16 @@ follows semantic versioning.
 
 ## 1.4.0 — 2026-09-26
 
+- **New: Python bindings.** `python/` adds a pure-ctypes package (`hcvault`,
+  no compiled extension, no runtime dependencies, Python 3.8+) wrapping the
+  same 35 `vcapi.h` functions: volume create/open (cipher, KDF, keyfiles,
+  PIM, hidden), sector-level I/O, FAT/exFAT file access through the bridge
+  (list, read, write, mkdir, delete, stat, space), and password/KDF
+  rotation. Tests mirror the C# suite (21 checks, including FAT through the
+  FatFs bridge, which the C# suite does not cover); CI runs them on every
+  push and builds a linux-x64 wheel (native library bundled, manylinux tag
+  derived from the .so's symbol versions) for GitHub Releases. Not on PyPI.
+
 - **New: free-space API.** `vc_exfat_get_space` (vcapi v4 — 35 exported
   functions) reports the total / free / cluster bytes of a mounted exFAT
   filesystem. The managed wrapper exposes it for both filesystems as
@@ -37,6 +47,34 @@ follows semantic versioning.
   0x8007000B load error), and the managed loader's failure message reports
   what the rejected file actually is ("the file is a Windows x86 (32-bit)
   executable").
+- CI: the Windows jobs no longer use `android-actions/setup-android` (it
+  tries to install Google's removed legacy `tools` package and fails on
+  every run); they export the runner's preinstalled Android SDK instead.
+  `build.ps1` now detects the installed Visual Studio via vswhere (VS 2022
+  and 2026 both supported) instead of hardcoding the VS 2026 CMake
+  generator, so it works on machines - and runners - without VS 2026.
+- CI is now two-mode: pushes and pull requests run the automated test
+  suite only (Linux job, both target frameworks); releases are published
+  by running the workflow manually from the Actions tab with a version
+  tag (e.g. `v1.4.0`, validated against the package version). That run
+  builds every platform and attaches the binaries to a GitHub Release —
+  the WPF demo as a framework-dependent zip (includes `hcvault-core.dll`,
+  needs the .NET 10 runtime), one APK per ABI for the MAUI demo, the
+  universal Android 5.0 demo APK and both NuGet packages. The WPF job now
+  builds the native library and publishes a zip instead of a bare
+  `dotnet build`.
+- CI speed: superseded push/PR runs are cancelled automatically (release
+  runs never are), the package job reuses the Android job's native
+  libraries instead of rebuilding all four ABIs (and no longer needs the
+  NDK at all), the Windows jobs cache the NuGet packages between runs, and
+  every job has a timeout cap.
+- API documentation expanded (both languages): full options/property/field
+  tables, all 15 ciphers and 6 KDFs with their native names, hidden-volume
+  workflow and safety rules, exception-to-status mapping (fixed a
+  documented-but-nonexistent `VcVolumeNotFoundException`), the complete
+  C function reference with status codes and struct layouts, volume
+  geometry (where the 262,144 header bytes go) and performance notes with
+  measured numbers.
 - vcapi v4 is additive (no signature changes), but `HCVault.Core` 1.4.0
   requires 1.4.0 binaries: older `hcvault-core` builds report API version 3
   and are rejected at startup. Rebuild or update the `HCVault.Native`

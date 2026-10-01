@@ -84,6 +84,27 @@ function Find-Cmake {
     throw 'cmake not found. Install the "Desktop development with C++" workload (C++ CMake tools) or add cmake to PATH.'
 }
 
+function Find-VsGenerator {
+    # CMake generator name of the newest Visual Studio that has C++ tools.
+    # The CMakePresets.json Windows presets hardcode the VS 2026 generator;
+    # detecting it here keeps build.ps1 working on machines (and CI runners)
+    # that only have an older Visual Studio installed.
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (-not (Test-Path $vswhere)) {
+        throw 'Visual Studio not found. Install VS 2022 or 2026 with the "Desktop development with C++" workload.'
+    }
+    $ver = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationVersion
+    if (-not $ver) {
+        throw 'No Visual Studio with C++ tools found. Install the "Desktop development with C++" workload.'
+    }
+    $major = ($ver -split '\.')[0]
+    $years = @{ '17' = '2022'; '18' = '2026' }
+    if (-not $years.ContainsKey($major)) {
+        throw "Visual Studio $ver is not supported by this script yet - add its generator to build.ps1 and CMakePresets.json."
+    }
+    return "Visual Studio $major $($years[$major])"
+}
+
 function Find-Ndk {
     if ($env:ANDROID_NDK_HOME -and (Test-Path (Join-Path $env:ANDROID_NDK_HOME 'build\cmake\android.toolchain.cmake'))) {
         return $env:ANDROID_NDK_HOME
@@ -243,18 +264,24 @@ if (-not $SkipNative) {
         if ($buildWindows) {
             # 'All' = every architecture this Windows host can build
             $archs = if ($Arch -eq 'All') { @('x64', 'x86', 'ARM64') } else { @($Arch) }
+            $generator = Find-VsGenerator
+            $platOf = @{ 'x64' = 'x64'; 'x86' = 'Win32'; 'ARM64' = 'ARM64' }   # VS generator platform names
+            Write-Host "  generator: $generator" -ForegroundColor DarkGray
             foreach ($a in $archs) {
-                $rid = $a.ToLowerInvariant()      # preset and directory names are lowercase
-                $preset = "windows-$rid-release"
-                Write-Host "== native: $preset ==" -ForegroundColor Cyan
-                & $cmake --preset $preset
+                $rid = $a.ToLowerInvariant()      # runtimes directory names are lowercase
+                $dir = "build-win-$rid"
+                Write-Host "== native: windows-$rid-release ==" -ForegroundColor Cyan
+                # -G/-A passed explicitly instead of the Windows presets: the
+                # presets hardcode the VS 2026 generator, this works with any
+                # installed Visual Studio (the other settings are identical)
+                & $cmake -S . -B $dir -G $generator -A $platOf[$a] -D CMAKE_CONFIGURATION_TYPES=Release
                 if ($LASTEXITCODE) { exit 1 }
-                & $cmake --build --preset $preset --parallel
+                & $cmake --build $dir --config Release --parallel
                 if ($LASTEXITCODE) { exit 1 }
 
                 # verify the DLL really is the requested architecture - a wrong-arch
                 # file here would later surface as a cryptic 0x8007000B load error
-                $dll = Join-Path $native "runtimes\win-$rid\native\hcvault-core.dll"
+                $dll = Join-Path $native "runtimes/win-$rid/native/hcvault-core.dll"
                 $machine = Get-PeMachine $dll
                 if ($null -eq $machine) {
                     throw "$dll was built but is not a readable PE file."

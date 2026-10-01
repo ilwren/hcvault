@@ -3,8 +3,8 @@ name: build-demos
 # Two modes:
 #   push / pull request  - automated tests only: the Linux job builds
 #                          hcvault-core and runs the managed test suite once
-#                          per target framework (net8.0 + net10.0). Nothing
-#                          is published.
+#                          per target framework (net8.0 + net10.0) plus the
+#                          Python wrapper tests. Nothing is published.
 #   manual run           - full release build, published as a GitHub Release:
 #     (Actions tab ->      Actions -> build-demos -> Run workflow -> enter
 #      "Run workflow")     the version tag, e.g. v1.4.0 (must match the
@@ -18,6 +18,8 @@ name: build-demos
 #                          (Windows x64/x86/ARM64, Android 4 ABIs; linux-x64
 #                           built by the native-linux job)
 #   - HCVault.Core         managed wrapper NuGet package
+#   - hcvault              Python wheel (pure-ctypes wrapper; linux-x64
+#                          native library bundled; not published to PyPI)
 
 on:
   push:
@@ -69,7 +71,7 @@ jobs:
           path: HCVault.Explorer-win-x64.zip
 
   native-linux:
-    name: native + managed tests (linux-x64)
+    name: native + managed + Python tests (linux-x64)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -85,6 +87,19 @@ jobs:
       # once per target framework (net8.0 + net10.0)
       - name: Build + test
         run: bash ./build.sh
+
+      # the Python wrapper runs against the freshly built linux-x64 library
+      # (same repository-layout discovery as the C# suite); once on the
+      # supported floor (3.8) and once on the runner's default Python
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+
+      - name: Python wrapper tests (3.8, supported floor)
+        run: python3 python/tests/run_tests.py
+
+      - name: Python wrapper tests (runner default)
+        run: /usr/bin/python3 python/tests/run_tests.py
 
       # the .so is only needed when a release is being assembled
       - uses: actions/upload-artifact@v4
@@ -171,6 +186,52 @@ jobs:
           name: androiddemo-apk
           path: app/HCVault.AndroidDemo/bin/Release/net10.0-android/*-Signed.apk
 
+  python-wheel:
+    name: Python wheel (linux-x64)
+    if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
+    needs: [native-linux]     # supplies the linux-x64 .so bundled into the wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      # linux-x64 .so built by the native-linux job; the wheel bundles it
+      # under hcvault/_binaries/linux-x64/ (setup.py)
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x64
+          path: native/runtimes/linux-x64/native/
+
+      - name: Build wheel
+        run: python3 -m pip wheel python/ -w wheelhouse/ --no-deps
+
+      # prove the wheel is self-contained: install into a clean venv and
+      # create + mount a volume from outside the repository
+      - name: Smoke test (install into a venv)
+        run: |
+          python3 -m venv /tmp/hcvenv
+          /tmp/hcvenv/bin/pip install wheelhouse/*.whl
+          cd /tmp
+          /tmp/hcvenv/bin/python - <<'EOF'
+          import os, tempfile
+          import hcvault
+          from hcvault import SecurePassword, Volume, VcFilesystem, ExFatFileSystem
+          with tempfile.TemporaryDirectory() as d:
+              p = os.path.join(d, "smoke.hc")
+              with SecurePassword.from_str("ci-smoke-test") as pw:
+                  Volume.create(p, 8 * 1024 * 1024, pw, filesystem=VcFilesystem.EXFAT)
+              with SecurePassword.from_str("ci-smoke-test") as pw, \
+                      Volume.open(p, pw) as vol, ExFatFileSystem.mount(vol) as fs:
+                  fs.write_file("/hello.txt", b"bundled wheel works")
+                  assert fs.read_file("/hello.txt") == b"bundled wheel works"
+          print("wheel smoke test passed: hcvault", hcvault.__version__)
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel
+          path: wheelhouse/*.whl
+
   package:
     name: NuGet package (HCVault.Native)
     if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
@@ -221,7 +282,7 @@ jobs:
   release:
     name: GitHub Release
     if: github.event_name == 'workflow_dispatch'
-    needs: [wpf, native-linux, android, package]
+    needs: [wpf, native-linux, android, package, python-wheel]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -252,6 +313,10 @@ jobs:
 
           # NuGet packages (HCVault.Native + HCVault.Core)
           find artifacts/nuget-package -name '*.nupkg' -exec cp {} release/ \;
+
+          # Python wheel (hcvault, linux-x64 library bundled)
+          find artifacts/python-wheel -name 'hcvault-*.whl' -exec cp {} release/ \
+              || { echo "missing release asset: hcvault wheel"; exit 1; }
 
           # fail loudly instead of shipping a partial release
           for f in HCVault.Explorer-win-x64.zip \
@@ -291,6 +356,12 @@ jobs:
               || { echo "package version mismatch: HCVault.Core $core_ver vs HCVault.Native $native_ver"; exit 1; }
           [ "$tag" = "v$core_ver" ] \
               || { echo "tag $tag does not match the built package version v$core_ver - bump the versions in the project files, or dispatch with v$core_ver"; exit 1; }
+
+          # the Python wheel must carry the same version as the packages
+          whl=$(find release -maxdepth 1 -name 'hcvault-*.whl' | head -n1)
+          whl_ver=$(basename "$whl" | sed -E 's/^hcvault-([^-]+)-.*/\1/')
+          [ "$whl_ver" = "$core_ver" ] \
+              || { echo "python wheel version $whl_ver does not match the package version $core_ver"; exit 1; }
 
           if gh release view "$tag"; then
             echo "release $tag already exists - replacing its assets"

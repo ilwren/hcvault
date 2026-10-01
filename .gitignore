@@ -31,6 +31,14 @@ packages/
 # Portable tools fetched by the build scripts
 .tools/
 
+# Python (bindings: build artifacts only - the wheel is never committed)
+__pycache__/
+*.py[cod]
+*.egg-info/
+python/dist/
+python/wheelhouse/
+python/src/hcvault/_binaries/
+
 # OS
 .DS_Store
 Thumbs.db

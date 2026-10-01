@@ -14,8 +14,8 @@ other way round.
 
 The volume core is the actual VeraCrypt source (1.26.29), vendored and
 patched only where portability required it. The cryptography is untouched.
-It is exposed through a small C API (`vcapi.h`, 35 functions) and a
-.NET 8 / .NET 10 wrapper on top of that.
+It is exposed through a small C API (`vcapi.h`, 35 functions), with a
+.NET 8 / .NET 10 wrapper and a pure-ctypes Python package on top.
 
 ```
  your app (C#, C/C++, or anything with an FFI)
@@ -95,6 +95,7 @@ It cannot:
 | Volume format | creates V2 (current); opens V2 and legacy V1; normal + hidden volumes. Official VeraCrypt opens these volumes and vice versa (Argon2id volumes require VeraCrypt 2016 or later) |
 | Native core | Windows x64 / x86 / ARM64 (MSVC), Linux x64 (GCC/Clang), Android arm64-v8a / armeabi-v7a / x86 / x86_64 (API 21+, NDK r26/r27, 16 KB page aligned). macOS builds on its POSIX base but is not tested |
 | Managed wrapper | .NET 8 and .NET 10 (`net8.0;net10.0`) |
+| Python package | 1.4.0 — Python 3.8+ (pure ctypes, no dependencies; the wheel bundles the native library, linux-x64 from CI) |
 | Demos | WPF (Windows), MAUI (Android 7.0 / API 24+), plain .NET Android (Android 5.0 / API 21+) |
 | Based on | VeraCrypt 1.26.29, FatFs R0.15 |
 
@@ -133,6 +134,23 @@ using (var fs = VolumeFilesystem.Mount(vol))      // FAT or exFAT, auto-detected
 }
 ```
 
+Python:
+
+```python
+# pip install the hcvault wheel from GitHub Releases
+from hcvault import SecurePassword, Volume, VcFilesystem, ExFatFileSystem
+
+with SecurePassword.from_str("correct horse battery staple") as pw:
+    Volume.create("demo.hc", 64 * 1024 * 1024, pw,
+                  filesystem=VcFilesystem.EXFAT)
+
+with SecurePassword.from_str("correct horse battery staple") as pw, \
+        Volume.open("demo.hc", pw) as vol, ExFatFileSystem.mount(vol) as fs:
+    fs.write_file("/notes.txt", b"hello, encryption")
+    for e in fs.listdir("/"):
+        print(e.name, e.size, "bytes")
+```
+
 C:
 
 ```c
@@ -147,8 +165,9 @@ vc_read_sectors(v, sector, 0, sizeof sector);   /* decrypted first sector */
 vc_close_volume(v);
 ```
 
-Full API documentation for both layers: [docs/API.md](docs/API.md)
-([中文](docs/API.zh-CN.md)).
+Full API documentation for the C and .NET layers:
+[docs/API.md](docs/API.md) ([中文](docs/API.zh-CN.md)). Python usage:
+[python/README.md](python/README.md).
 
 ## Building
 
@@ -171,9 +190,17 @@ toolchain. Android also needs NDK r26/r27; the MAUI demo needs the
 ```
 
 The scripts find CMake, the NDK and Ninja on their own (and can fetch a
-portable Ninja — `-NoDownload` / `VCN_NO_DOWNLOAD=1` disables that). CI
-builds the demo apps and the NuGet package on every push:
-[.github/workflows/build-demos.yml](.github/workflows/build-demos.yml).
+portable Ninja — `-NoDownload` / `VCN_NO_DOWNLOAD=1` disables that).
+
+CI runs the automated test suite (native + managed, both target
+frameworks, plus the Python wrapper) on every push: [.github/workflows/build-demos.yml](.github/workflows/build-demos.yml).
+Releases are published manually: Actions → build-demos → Run workflow →
+enter the version tag (e.g. `v1.4.0`, must match the project version).
+That run builds every platform and attaches the binaries to a GitHub
+Release: the WPF demo as a framework-dependent zip (needs the .NET 10
+runtime), one APK per ABI for the MAUI demo, the universal Android 5.0
+demo APK, both NuGet packages, and the Python wheel (linux-x64, native
+library bundled).
 
 Android demo APKs: a plain build produces the default package (arm64-v8a +
 x86_64); `dotnet publish -c Release -r android-arm64` (also `-arm`/`-x64`/
@@ -185,6 +212,7 @@ x86_64); `dotnet publish -c Release -r android-arm64` (also `-arm`/`-x64`/
 |---|---|
 | `native/` | CMake project: vendored VeraCrypt core + FatFs + `vcapi.h` + C test suite |
 | `managed/HCVault.Core/` | .NET 8/10 wrapper (NuGet `HCVault.Core`) |
+| `python/` | Python bindings (pure ctypes) + tests + wheel packaging |
 | `app/HCVault.Explorer/` | WPF demo |
 | `app/HCVault.MauiDemo/` | MAUI demo, Android 7.0+ |
 | `app/HCVault.AndroidDemo/` | plain .NET Android demo, Android 5.0+ |

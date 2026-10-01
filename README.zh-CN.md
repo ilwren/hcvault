@@ -10,8 +10,8 @@
 序打开，官方创建的也能在这里打开。
 
 卷核心就是 VeraCrypt 的原始源码（1.26.29），只为可移植性做了少量修补，密码
-学部分原封未动。对外暴露一个很小的 C 接口（`vcapi.h`，35 个函数）和一层
-.NET 8 / .NET 10 封装。
+学部分原封未动。对外暴露一个很小的 C 接口（`vcapi.h`，35 个函数），上面有 .NET 8 /
+.NET 10 封装和纯 ctypes 的 Python 包。
 
 ```
  你的应用（C#、C/C++，或任何有 FFI 的语言）
@@ -76,6 +76,7 @@ VeraCrypt 本来的东西，不是重新实现。
 | 卷格式 | 创建 V2（当前版）；打开 V2 和旧版 V1；普通卷 + 隐藏卷。与官方 VeraCrypt 互通（Argon2id 卷需对方为 2016 年后的版本） |
 | 原生核心 | Windows x64 / x86 / ARM64（MSVC）、Linux x64（GCC/Clang）、Android arm64-v8a / armeabi-v7a / x86 / x86_64（API 21+，NDK r26/r27，16KB 页对齐）。macOS 可编译但未测试 |
 | 托管封装 | .NET 8 与 .NET 10（`net8.0;net10.0`） |
+| Python 包 | 1.4.0 — Python 3.8+（纯 ctypes，零依赖；wheel 内含原生库，CI 产出 linux-x64） |
 | 演示程序 | WPF（Windows）、MAUI（Android 7.0 / API 24+）、纯 .NET Android（Android 5.0 / API 21+） |
 | 基于版本 | VeraCrypt 1.26.29、FatFs R0.15 |
 
@@ -114,6 +115,23 @@ using (var fs = VolumeFilesystem.Mount(vol))      // FAT / exFAT 自动识别
 }
 ```
 
+Python：
+
+```python
+# 从 GitHub Releases 安装 hcvault wheel
+from hcvault import SecurePassword, Volume, VcFilesystem, ExFatFileSystem
+
+with SecurePassword.from_str("correct horse battery staple") as pw:
+    Volume.create("demo.hc", 64 * 1024 * 1024, pw,
+                  filesystem=VcFilesystem.EXFAT)
+
+with SecurePassword.from_str("correct horse battery staple") as pw, \
+        Volume.open("demo.hc", pw) as vol, ExFatFileSystem.mount(vol) as fs:
+    fs.write_file("/notes.txt", b"hello, encryption")
+    for e in fs.listdir("/"):
+        print(e.name, e.size, "bytes")
+```
+
 C：
 
 ```c
@@ -128,8 +146,9 @@ vc_read_sectors(v, sector, 0, sizeof sector);   /* 解密后的第一个扇区 *
 vc_close_volume(v);
 ```
 
-两层的完整 API 文档：[docs/API.zh-CN.md](docs/API.zh-CN.md)
-（[English](docs/API.md)）。
+C 与 .NET 两层的完整 API 文档：[docs/API.zh-CN.md](docs/API.zh-CN.md)
+（[English](docs/API.md)）。Python 用法见
+[python/README.zh-CN.md](python/README.zh-CN.md)。
 
 ## 构建
 
@@ -151,8 +170,16 @@ MAUI 演示另需 `maui-android` 工作负载。
 ```
 
 脚本会自行探测 CMake、NDK 和 Ninja（必要时可下载便携版 Ninja，`-NoDownload` /
-`VCN_NO_DOWNLOAD=1` 禁用）。每次 push 会在 CI 上编译演示项目和 NuGet 包：
+`VCN_NO_DOWNLOAD=1` 禁用）。
+
+每次 push 会在 CI 上跑自动测试（原生 + 托管，两个目标框架各一遍，另有
+Python 封装一遍）：
 [.github/workflows/build-demos.yml](.github/workflows/build-demos.yml)。
+版本发布手动触发：Actions → build-demos → Run workflow → 填入版本标签
+（如 `v1.4.0`，需与项目内的版本号一致）。该次运行会构建全部平台，并把
+编译产物附到 GitHub Release：WPF 演示的依赖框架 zip（需 .NET 10 运行时）、
+MAUI 演示的逐 ABI APK、Android 5.0 通用演示 APK、两个 NuGet 包，以及
+Python wheel（linux-x64，内含原生库）。
 
 Android 演示 APK：直接构建得到默认包（arm64-v8a + x86_64）；
 `dotnet publish -c Release -r android-arm64`（还有 `-arm`/`-x64`/`-x86`）
@@ -164,6 +191,7 @@ Android 演示 APK：直接构建得到默认包（arm64-v8a + x86_64）；
 |---|---|
 | `native/` | CMake 工程：引入的 VeraCrypt 核心 + FatFs + `vcapi.h` + C 测试 |
 | `managed/HCVault.Core/` | .NET 8/10 封装（NuGet `HCVault.Core`） |
+| `python/` | Python 绑定（纯 ctypes）+ 测试 + wheel 打包 |
 | `app/HCVault.Explorer/` | WPF 演示 |
 | `app/HCVault.MauiDemo/` | MAUI 演示，Android 7.0+ |
 | `app/HCVault.AndroidDemo/` | 纯 .NET Android 演示，Android 5.0+ |

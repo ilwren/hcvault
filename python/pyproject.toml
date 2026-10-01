@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hcvault"
+dynamic = ["version"]   # single source of truth: __version__ in src/hcvault/__init__.py
+description = "VeraCrypt-compatible encrypted volumes from Python (pure-ctypes bindings for hcvault-core)"
+readme = "README.md"
+requires-python = ">=3.8"
+license = "Apache-2.0"
+authors = [{ name = "HCVault contributors" }]
+keywords = ["veracrypt", "encryption", "volume", "container", "exfat", "fat", "cryptography"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security :: Cryptography",
+    "Typing :: Typed",
+]
+
+# No runtime dependencies: the wrapper is pure ctypes. The hcvault-core
+# native library is either bundled in the wheel (built from the repository
+# sources, see setup.py) or found via VCNATIVE_HOME / the system loader.
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+hcvault = ["py.typed", "_binaries/*/*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "hcvault.__version__" }

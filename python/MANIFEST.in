@@ -1,0 +1,8 @@
+# sdist = source only; the native library is never shipped in the sdist
+# (it is built from source with CMake, and bundled only into wheels)
+include README.md
+include README.zh-CN.md
+recursive-include src *.py py.typed
+recursive-include tests *.py
+prune src/hcvault/_binaries
+global-exclude *.so *.dll *.dylib *.pyc __pycache__
