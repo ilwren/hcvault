@@ -4,14 +4,19 @@ name: build-demos
 #   push / pull request  - automated tests only: the Linux job builds
 #                          hcvault-core and runs the managed test suite once
 #                          per target framework (net8.0 + net10.0) plus the
-#                          Python wrapper tests. Nothing is published.
+#                          Python wrapper tests; the AOT job publishes the
+#                          smoke consumer as a native executable and runs
+#                          it. Nothing is published.
 #   manual run           - full release build, published as a GitHub Release:
 #     (Actions tab ->      Actions -> build-demos -> Run workflow -> enter
 #      "Run workflow")     the version tag, e.g. v1.4.0 (must match the
 #                          version in the project files).
 #
 # Release contents:
-#   - HCVault.Explorer     WPF (Windows), framework-dependent zip
+#   - HCVault.Explorer     Avalonia UI demo (Windows x64 zip, linux-x64 and
+#                          macOS arm64 tar.gz), published as Native AOT
+#                          single-file executables (no .NET runtime needed;
+#                          macOS is best effort)
 #   - HCVault.MauiDemo     .NET MAUI, Android — one APK per ABI
 #   - HCVault.AndroidDemo  plain .NET Android (API 21+), universal APK
 #   - HCVault.Native       NuGet package with the prebuilt native libraries
@@ -40,8 +45,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
-  wpf:
-    name: WPF demo (HCVault.Explorer)
+  avalonia-windows:
+    name: Avalonia demo (HCVault.Explorer, win-x64 AOT)
     if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
     runs-on: windows-latest
     timeout-minutes: 45
@@ -52,23 +57,26 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # the demo loads hcvault-core.dll at runtime - build it so the zip
-      # contains everything needed to run (the loader finds it next to the exe)
       - name: Build native library (win-x64)
         run: .\build.ps1 -Arch x64 -SkipManaged -NoDownload
 
-      - name: Publish WPF demo (framework-dependent)
+      # Native AOT: a single native executable, no .NET runtime needed. The
+      # AOT link step uses the MSVC linker that ships with the runner image.
+      - name: Publish demo (Native AOT, win-x64)
         run: |
-          dotnet publish app/HCVault.Explorer -c Release -o publish\wpf
+          dotnet publish app/HCVault.Explorer -c Release -r win-x64
           if ($LASTEXITCODE) { exit 1 }
-          Copy-Item native\runtimes\win-x64\native\hcvault-core.dll publish\wpf\
+          $pub = 'app\HCVault.Explorer\bin\Release\net10.0\win-x64\publish'
+          Copy-Item native\runtimes\win-x64\native\hcvault-core.dll $pub\
+          Remove-Item $pub\*.pdb, $pub\*.dbg -ErrorAction SilentlyContinue
+          Get-ChildItem $pub | Select-Object -ExpandProperty Name
 
       - name: Package zip
-        run: Compress-Archive -Path publish\wpf\* -DestinationPath HCVault.Explorer-win-x64.zip
+        run: Compress-Archive -Path app\HCVault.Explorer\bin\Release\net10.0\win-x64\publish\* -DestinationPath HCVault.Explorer-win-x64.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: wpf-demo
+          name: avalonia-win-x64
           path: HCVault.Explorer-win-x64.zip
 
   native-linux:
@@ -108,6 +116,53 @@ jobs:
         with:
           name: native-linux-x64
           path: native/runtimes/linux-x64/native/
+
+  aot:
+    name: AOT smoke + Avalonia demo (linux-x64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Native AOT links with clang and needs zlib; both ship with the
+      # ubuntu runner image - install defensively (fast no-op if present)
+      - name: Native AOT toolchain (clang + zlib)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang zlib1g-dev
+
+      - name: Build native library (linux-x64)
+        run: |
+          cmake -S native -B build-local -D CMAKE_BUILD_TYPE=Release
+          cmake --build build-local --parallel 3
+
+      # the smoke consumer (tests/HCVault.AotTests) publishes as a single
+      # native executable and runs the full volume workflow: reflection or
+      # non-source-generated interop added to HCVault.Core later fails the
+      # IsAotCompatible analyzers here at publish time, or the run below
+      - name: Publish + run AOT smoke test
+        run: |
+          dotnet publish tests/HCVault.AotTests -c Release -r linux-x64
+          VCNATIVE_HOME="$PWD/native/runtimes/linux-x64/native" \
+            tests/HCVault.AotTests/bin/Release/net10.0/linux-x64/publish/HCVault.AotTests
+
+      # the demo as a Native AOT single-file executable (release builds only)
+      - name: Publish Avalonia demo (linux-x64, Native AOT)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          dotnet publish app/HCVault.Explorer -c Release -r linux-x64
+          PUB=app/HCVault.Explorer/bin/Release/net10.0/linux-x64/publish
+          rm -f "$PUB"/*.dbg "$PUB"/*.pdb
+          cp native/runtimes/linux-x64/native/libhcvault-core.so "$PUB"/
+          tar -czf HCVault.Explorer-linux-x64.tar.gz -C "$PUB" .
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: avalonia-linux-x64
+          path: HCVault.Explorer-linux-x64.tar.gz
 
   android:
     name: Android demos (MAUI per-ABI APKs + API 21 demo)
@@ -186,6 +241,42 @@ jobs:
         with:
           name: androiddemo-apk
           path: app/HCVault.AndroidDemo/bin/Release/net10.0-android/*-Signed.apk
+
+  avalonia-macos:
+    name: Avalonia demo (macos-arm64 AOT, best effort)
+    if: github.event_name == 'workflow_dispatch'   # release build: manual runs only
+    runs-on: macos-latest
+    timeout-minutes: 30
+    # the macOS native library builds on the POSIX base but is otherwise
+    # untested - a failure must not block the release (it ships without a
+    # macOS demo archive that time)
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # VC_RID must be passed explicitly: the CMake RID inference has no
+      # Darwin branch and would otherwise file the library under linux-arm64
+      - name: Build native library (osx-arm64)
+        run: |
+          cmake -S native -B build-local -D CMAKE_BUILD_TYPE=Release -D VC_RID=osx-arm64
+          cmake --build build-local --parallel 3
+
+      - name: Publish demo (Native AOT, osx-arm64)
+        run: |
+          dotnet publish app/HCVault.Explorer -c Release -r osx-arm64
+          PUB=app/HCVault.Explorer/bin/Release/net10.0/osx-arm64/publish
+          rm -f "$PUB"/*.dbg "$PUB"/*.pdb
+          cp native/runtimes/osx-arm64/native/libhcvault-core.dylib "$PUB"/
+          tar -czf HCVault.Explorer-macos-arm64.tar.gz -C "$PUB" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: avalonia-macos
+          path: HCVault.Explorer-macos-arm64.tar.gz
 
   python-wheel-linux:
     name: Python wheel (linux-x64)
@@ -346,7 +437,7 @@ jobs:
   release:
     name: GitHub Release
     if: github.event_name == 'workflow_dispatch'
-    needs: [wpf, native-linux, android, package, python-wheel-linux, python-wheel-windows, python-wheel-macos]
+    needs: [avalonia-windows, native-linux, aot, android, package, python-wheel-linux, python-wheel-windows, python-wheel-macos, avalonia-macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -363,7 +454,13 @@ jobs:
         run: |
           set -e
           mkdir release
-          cp artifacts/wpf-demo/HCVault.Explorer-win-x64.zip release/
+          # Avalonia demo archives: win-x64 + linux-x64 required, macOS best effort
+          cp artifacts/avalonia-win-x64/HCVault.Explorer-win-x64.zip release/ \
+              || { echo "missing release asset: win-x64 demo zip"; exit 1; }
+          cp artifacts/avalonia-linux-x64/HCVault.Explorer-linux-x64.tar.gz release/ \
+              || { echo "missing release asset: linux-x64 demo tar.gz"; exit 1; }
+          cp artifacts/avalonia-macos/*.tar.gz release/ 2>/dev/null \
+              || echo "note: no macOS demo archive this run (best-effort job)"
 
           # MAUI APKs: one per ABI, renamed after their RID folders
           find artifacts/maui-apks -name '*.apk' | while read -r apk; do
@@ -390,6 +487,7 @@ jobs:
 
           # fail loudly instead of shipping a partial release
           for f in HCVault.Explorer-win-x64.zip \
+                   HCVault.Explorer-linux-x64.tar.gz \
                    HCVault.MauiDemo-android-arm64.apk \
                    HCVault.MauiDemo-android-arm.apk \
                    HCVault.MauiDemo-android-x64.apk \

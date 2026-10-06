@@ -6,6 +6,11 @@
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Native AOT: all interop is source-generated ([LibraryImport]) and the
+         code uses no reflection, so the library is AOT compatible (verified:
+         full publish + functional smoke test on net8.0 and net10.0) -->
+    <IsAotCompatible>true</IsAotCompatible>
     <ImplicitUsings>enable</ImplicitUsings>
 
     <!-- NuGet packaging (source-only: build offline, then `dotnet pack`) -->

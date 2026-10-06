@@ -1,0 +1,102 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="using:HCVault.Explorer"
+        x:Class="HCVault.Explorer.MainWindow"
+        Title="HCVault Explorer" Width="920" Height="640"
+        WindowStartupLocation="CenterScreen">
+
+    <Window.Styles>
+        <Style Selector="Border.group">
+            <Setter Property="BorderBrush" Value="#66555555" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="Padding" Value="10" />
+            <Setter Property="Margin" Value="0,8,0,0" />
+        </Style>
+        <Style Selector="TextBlock.groupHeader">
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="Opacity" Value="0.7" />
+        </Style>
+    </Window.Styles>
+
+    <Grid Margin="10" RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- ============================= volume bar ============================= -->
+        <Border Grid.Row="0" Classes="group" Margin="0">
+            <StackPanel>
+                <TextBlock Classes="groupHeader" Text="Volume" />
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto" Margin="0,6,0,0">
+                    <TextBox x:Name="VolumePath" VerticalAlignment="Center"
+                             ToolTip.Tip="Path of the .hc container file" />
+                    <Button Grid.Column="1" Content="..." Margin="4,0,0,0" Click="Browse_OnClick" />
+                    <Button Grid.Column="2" Content="Create..." Margin="8,0,0,0" Click="Create_OnClick" />
+                    <Button Grid.Column="3" x:Name="OpenButton" Content="Open / Close" IsDefault="True" Click="Open_OnClick" />
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- ============================ credentials ============================= -->
+        <Border Grid.Row="1" Classes="group">
+            <StackPanel>
+                <TextBlock Classes="groupHeader" Text="Credentials" />
+                <Grid ColumnDefinitions="*,Auto,*,Auto" RowDefinitions="Auto,Auto" Margin="0,6,0,0">
+                    <TextBox Grid.Row="0" Grid.Column="0" x:Name="Password" VerticalAlignment="Center"
+                             PasswordChar="*"
+                             ToolTip.Tip="Password" />
+                    <TextBlock Grid.Row="0" Grid.Column="1" Text="PIM:" Margin="12,0,4,0" VerticalAlignment="Center" />
+                    <TextBox Grid.Row="0" Grid.Column="2" x:Name="PimBox" VerticalAlignment="Center" Text="0"
+                             ToolTip.Tip="0 = default iterations" />
+
+                    <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" Margin="0,8,0,0">
+                        <TextBlock Text="Key file:" VerticalAlignment="Center" />
+                        <TextBox x:Name="KeyFileBox" Width="220" Margin="4,0,0,0" VerticalAlignment="Center"
+                                 ToolTip.Tip="Optional key file path (leave empty for none)" />
+                        <Button Content="Key..." Margin="4,0,12,0" Click="KeyFile_OnClick" />
+                        <TextBlock Text="KDF:" VerticalAlignment="Center" />
+                        <TextBlock x:Name="KdfLabel" Margin="4,0,12,0" VerticalAlignment="Center" Text="-" FontWeight="Bold" />
+                        <TextBlock Text="Cipher:" VerticalAlignment="Center" />
+                        <TextBlock x:Name="CipherLabel" Margin="4,0,12,0" VerticalAlignment="Center" Text="-" FontWeight="Bold" />
+                        <TextBlock x:Name="HiddenLabel" VerticalAlignment="Center" Text="" FontWeight="Bold" Foreground="DarkOrange" />
+                    </StackPanel>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- ============================== explorer ============================== -->
+        <Border Grid.Row="2" Classes="group">
+            <Grid RowDefinitions="Auto,Auto,*">
+                <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+                    <TextBlock x:Name="CurrentDir" Text="\" VerticalAlignment="Center" FontWeight="Bold" />
+                    <Button Content="Up" Margin="8,0,0,0" Click="Up_OnClick" />
+                    <Button Content="New folder" Margin="4,0,0,0" Click="NewFolder_OnClick" />
+                    <Button Content="Import file..." Margin="4,0,0,0" Click="Import_OnClick" />
+                    <Button Content="Export file..." Margin="4,0,0,0" Click="Export_OnClick" />
+                    <Button Content="Delete" Margin="4,0,0,0" Click="Delete_OnClick" />
+                </StackPanel>
+
+                <Grid Grid.Row="1" ColumnDefinitions="2*,70,100,180" Margin="6,2,6,4">
+                    <TextBlock Grid.Column="0" Text="Name" FontWeight="Bold" />
+                    <TextBlock Grid.Column="1" Text="Type" FontWeight="Bold" />
+                    <TextBlock Grid.Column="2" Text="Size" FontWeight="Bold" />
+                    <TextBlock Grid.Column="3" Text="Modified (UTC)" FontWeight="Bold" />
+                </Grid>
+
+                <ListBox Grid.Row="2" x:Name="FileList" DoubleTapped="FileList_OnDoubleTapped">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="local:FileRow">
+                            <Grid ColumnDefinitions="2*,70,100,180" Margin="6,2">
+                                <TextBlock Grid.Column="0" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="1" Text="{Binding Type}" />
+                                <TextBlock Grid.Column="2" Text="{Binding Size}" />
+                                <TextBlock Grid.Column="3" Text="{Binding Modified}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
+
+        <!-- =============================== status =============================== -->
+        <TextBlock Grid.Row="3" x:Name="Status" Text="Ready." Margin="0,8,0,0" Opacity="0.7" TextWrapping="Wrap" />
+    </Grid>
+</Window>

@@ -2,17 +2,29 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
+    <TargetFramework>net10.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- allows building the WPF app on non-Windows CI machines -->
-    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <AssemblyName>HCVault.Explorer</AssemblyName>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
     <IsPackable>false</IsPackable>
+
+    <!-- Native AOT: publishes as a single native executable per platform
+         (dotnet publish -c Release -r win-x64 / linux-x64 / osx-arm64) - no
+         .NET runtime needed to run. HCVault.Core is AOT compatible and
+         Avalonia compiles all XAML at build time, so nothing here needs a
+         runtime code generator. -->
+    <PublishAot>true</PublishAot>
+    <!-- compiled (reflection-free) XAML bindings -->
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\managed\HCVault.Core\HCVault.Core.csproj" />

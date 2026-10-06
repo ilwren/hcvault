@@ -9,5 +9,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/HCVault.Core.Tests/HCVault.Core.Tests.csproj" />
+    <Project Path="tests/HCVault.AotTests/HCVault.AotTests.csproj" />
   </Folder>
 </Solution>

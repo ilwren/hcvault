@@ -1,0 +1,48 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vc="using:HCVault.Core"
+        x:Class="HCVault.Explorer.CreateVolumeWindow"
+        Title="Create volume" Width="440" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" CanResize="False" ShowInTaskbar="False">
+    <StackPanel Margin="16">
+        <TextBlock Text="Size (MB):" />
+        <TextBox x:Name="SizeBox" Text="100" />
+
+        <TextBlock Text="Password:" Margin="0,10,0,0" />
+        <TextBox x:Name="PwBox" PasswordChar="*" />
+
+        <TextBlock Text="Repeat password:" Margin="0,10,0,0" />
+        <TextBox x:Name="PwBox2" PasswordChar="*" />
+
+        <TextBlock Text="PIM (0 = default):" Margin="0,10,0,0" />
+        <TextBox x:Name="PimBox" Text="0" />
+
+        <TextBlock Text="Key file (optional):" Margin="0,10,0,0" />
+        <Grid ColumnDefinitions="*,Auto">
+            <TextBox x:Name="KeyFileBox" />
+            <Button Grid.Column="1" Content="..." Margin="4,0,0,0" Click="BrowseKey_OnClick" />
+        </Grid>
+
+        <TextBlock Text="Encryption:" Margin="0,10,0,0" />
+        <ComboBox x:Name="CipherBox"
+                  ItemsSource="{x:Static vc:HCVaultLibrary.SupportedCiphers}"
+                  SelectedIndex="0" />
+
+        <TextBlock Text="Header KDF:" Margin="0,10,0,0" />
+        <ComboBox x:Name="KdfBox"
+                  ItemsSource="{x:Static vc:HCVaultLibrary.SupportedKdfs}"
+                  SelectedIndex="5" />
+
+        <TextBlock Text="Filesystem:" Margin="0,10,0,0" />
+        <ComboBox x:Name="FsBox" SelectedIndex="0">
+            <ComboBoxItem Content="FAT (built-in)" />
+            <ComboBoxItem Content="exFAT (FatFs)" />
+            <ComboBoxItem Content="None (raw sectors)" />
+        </ComboBox>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Create" Width="84" IsDefault="True" Click="Create_OnClick" />
+            <Button Content="Cancel" Width="84" Margin="6,0,0,0" IsCancel="True" />
+        </StackPanel>
+    </StackPanel>
+</Window>

@@ -6,6 +6,25 @@ follows semantic versioning.
 
 ## 1.4.0 — 2026-09-26
 
+- **The desktop demo is now an Avalonia app published with Native AOT.**
+  `HCVault.Explorer` was rewritten from WPF (Windows-only, could not be
+  AOT-published) to Avalonia 11 with the same UI (volume bar, credentials
+  with keyfile/PIM, file list with import/export, Fluent theme following
+  the OS light/dark setting - now natively on all three desktop OSes).
+  Releases carry it as Native AOT single-file executables: a win-x64 zip
+  and a linux-x64 tar.gz (both built and required in CI) plus a best-effort
+  macos-arm64 tar.gz. No .NET runtime is needed to run them.
+
+- **New: Native AOT compatibility.** `HCVault.Core` builds with
+  `IsAotCompatible` (the interop layer is entirely source-generated
+  `[LibraryImport]` bindings and the code uses no reflection). Verified by
+  publishing an AOT test consumer (`PublishAot`) on net8.0 and net10.0 -
+  zero trim/AOT warnings, and the full smoke test (create with progress
+  callback, open with keyfile + PIM, sector I/O, exFAT mount with unicode
+  filenames, space query) passes as a single native executable. CI keeps
+  it that way: every push publishes and runs the AOT smoke consumer
+  (`tests/HCVault.AotTests`) on linux-x64.
+
 - **New: Python bindings.** `python/` adds a pure-ctypes package (`hcvault`,
   no compiled extension, no runtime dependencies, Python 3.8+) wrapping the
   same 35 `vcapi.h` functions: volume create/open (cipher, KDF, keyfiles,

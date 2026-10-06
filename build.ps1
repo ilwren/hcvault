@@ -335,7 +335,7 @@ if (-not $SkipManaged) {
     # architecture is a good guess for it); if it is missing, fall back to
     # whatever was built and let the test loader print a precise error on an
     # architecture mismatch. With no library at all the tests are skipped with
-    # a note - only the tests need it, the managed and WPF builds do not.
+    # a note - only the tests need it, the managed and demo builds do not.
     $testLib = Join-Path $native "runtimes\$hostRid\native\hcvault-core.dll"
     $runTests = $true
     if (-not (Test-Path $testLib)) {
@@ -348,7 +348,7 @@ if (-not $SkipManaged) {
         }
         elseif ($SkipNative -or -not $buildWindows) {
             Write-Host '  no hcvault-core.dll under native\runtimes - the managed tests need it, tests skipped.' -ForegroundColor Yellow
-            Write-Host '  Run .\build.ps1 (without -SkipNative) to build it; the managed and WPF builds below do not need it.' -ForegroundColor Yellow
+            Write-Host '  Run .\build.ps1 (without -SkipNative) to build it; the managed and demo builds below do not need it.' -ForegroundColor Yellow
             $runTests = $false
         }
         else {
@@ -389,9 +389,9 @@ if (-not $SkipManaged) {
     dotnet build (Join-Path $root 'app\HCVault.Explorer') -c Release
     if ($LASTEXITCODE) { exit 1 }
     if ($runTests) {
-        Write-Host '  -> managed + WPF app built, managed tests passed' -ForegroundColor Green
+        Write-Host '  -> managed + Avalonia app built, managed tests passed' -ForegroundColor Green
     } else {
-        Write-Host '  -> managed + WPF app built (managed tests skipped: no native library)' -ForegroundColor Yellow
+        Write-Host '  -> managed + Avalonia app built (managed tests skipped: no native library)' -ForegroundColor Yellow
     }
 }
 

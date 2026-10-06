@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Native AOT smoke test: this consumer publishes as a single native
+    executable (PublishAot) and exercises every risky interop path of
+    HCVault.Core - source-generated [LibraryImport] marshaling (UTF-8
+    strings, byte[] I/O, string[] keyfiles), the managed -> native progress
+    callback, the FAT/exFAT driver and the native-library loader.
+
+    Any reflection or dynamic interop added to HCVault.Core later fails
+    here at publish time (IsAotCompatible analyzers) or at the functional
+    smoke run. CI runs it on every push; locally:
+
+      dotnet publish tests/HCVault.AotTests -c Release -r linux-x64
+      VCNATIVE_HOME=<path to libhcvault-core> \
+        tests/HCVault.AotTests/bin/Release/net10.0/linux-x64/publish/HCVault.AotTests
+
+    net10.0 only: the library's own build runs the AOT analyzers on both
+    target frameworks, and the code paths below are framework-independent
+    (verified manually on net8.0 AOT as well).
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\managed\HCVault.Core\HCVault.Core.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,10 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="HCVault.Explorer.App"
+             RequestedThemeVariant="Default">
+    <!-- Fluent theme; "Default" follows the OS light/dark setting on
+         Windows, Linux and macOS, including live changes -->
+    <Application.Styles>
+        <FluentTheme />
+    </Application.Styles>
+</Application>
