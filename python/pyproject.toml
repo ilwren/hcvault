@@ -31,11 +31,21 @@ classifiers = [
 [tool.setuptools]
 package-dir = { "" = "src" }
 
+# the bundled native library is copied into the wheel by setup.py's build_py
+# (deterministic, stateless). package_data globs + include_package_data are
+# deliberately not used for it: setuptools resolves them at egg-info time and
+# reads the list back from egg-info/SOURCES.txt during the build - when
+# several wheels are built in a row in the same tree (the CI cross-arch
+# builds), that manifest still lists the PREVIOUS wheel's _binaries
+# directory, which has just been cleaned away -> "package directory ... does
+# not exist"
+include-package-data = false
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-hcvault = ["py.typed", "_binaries/*/*"]
+hcvault = ["py.typed"]
 
 [tool.setuptools.dynamic]
 version = { attr = "hcvault.__version__" }

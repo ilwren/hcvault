@@ -332,7 +332,14 @@ jobs:
           python -m pip wheel python/ -w wheelhouse/ --no-deps
           $env:HCVAULT_WHEEL_RID = 'win-arm64'
           python -m pip wheel python/ -w wheelhouse/ --no-deps
-          Get-ChildItem wheelhouse/ | Select-Object -ExpandProperty Name
+          # fail fast if any of the three builds silently produced nothing
+          # (the release job would otherwise only fail much later)
+          $wheels = Get-ChildItem wheelhouse -Filter '*.whl'
+          if ($wheels.Count -ne 3) { throw "expected 3 wheels, got $($wheels.Count): $($wheels.Name -join ', ')" }
+          foreach ($tag in 'win_amd64','win32','win_arm64') {
+            if (-not ($wheels | Where-Object { $_.Name -like "*-$tag.whl" })) { throw "missing wheel for tag $tag" }
+          }
+          Get-ChildItem wheelhouse | Select-Object -ExpandProperty Name
 
       # the x64 wheel installs on this runner - prove it end to end
       - name: Smoke test (x64 wheel, clean venv)

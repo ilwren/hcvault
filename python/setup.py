@@ -28,10 +28,10 @@ from pathlib import Path
 
 from setuptools import setup
 from setuptools.command.bdist_wheel import bdist_wheel as _bdist_wheel
+from setuptools.command.build_py import build_py as _build_py
 
 HERE = Path(__file__).resolve().parent
 NATIVE_RUNTIMES = HERE.parent / "native" / "runtimes"
-BINARIES_DIR = HERE / "src" / "hcvault" / "_binaries"
 
 
 # platform tag per Windows RID; Linux tags are derived from the .so's symbol
@@ -123,27 +123,43 @@ def _linux_tag(lib: Path, rid: str) -> str:
     return f"manylinux_{major}_{minor}_{arch}"
 
 
+class build_py(_build_py):
+    """Place the bundled native library into the wheel layout explicitly
+    (build_lib/hcvault/_binaries/<rid>/). See pyproject.toml for why this is
+    a plain copy and not package_data/include_package_data: those resolve at
+    egg-info time and replay a stale manifest when several wheels are built
+    in a row in the same tree (the CI cross-arch builds)."""
+
+    def run(self):
+        super().run()
+        bundle = getattr(self.distribution, "hcvault_bundle", None)
+        if bundle is None:
+            return
+        rid, src = bundle
+        dest_dir = os.path.join(self.build_lib, "hcvault", "_binaries", rid)
+        os.makedirs(dest_dir, exist_ok=True)
+        dest = os.path.join(dest_dir, os.path.basename(src))
+        shutil.copy2(src, dest)
+        print(f"hcvault: bundled into wheel: hcvault/_binaries/{rid}/{os.path.basename(src)}")
+
+
 class bdist_wheel(_bdist_wheel):
     def run(self):
         rid, libname = _rid_and_lib()
-        # start from a clean slate: a stale _binaries from an earlier build
-        # must never leak into a wheel that bundles nothing (mismatched tag).
-        # Includes the incremental build/ tree - build_py skips unchanged
-        # files, so a leftover copy there would survive the rmtree above.
-        if BINARIES_DIR.is_dir():
-            shutil.rmtree(BINARIES_DIR)
+        src = NATIVE_RUNTIMES / rid / "native" / libname
+        # wipe the incremental build/ tree: leftovers from an earlier wheel
+        # build in this directory must never leak into this wheel
         incremental_build = HERE / "build"
         if incremental_build.is_dir():
             shutil.rmtree(incremental_build)
-        src = NATIVE_RUNTIMES / rid / "native" / libname
+        # handed to build_py through the shared Distribution object
+        self.distribution.hcvault_bundle = None
         self.hcvault_bundled_rid = None
         if src.is_file():
-            dest = BINARIES_DIR / rid / libname
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, dest)
+            self.distribution.hcvault_bundle = (rid, str(src))
             self.hcvault_bundled_rid = rid
-            self.hcvault_bundled_lib = dest
-            print(f"hcvault: bundling {src} -> {dest.relative_to(HERE)}")
+            self.hcvault_bundled_lib = src
+            print(f"hcvault: bundling {src} ({rid})")
         else:
             print(
                 f"hcvault: {src} not found - building a pure wheel "
@@ -165,4 +181,4 @@ class bdist_wheel(_bdist_wheel):
         return tuple(tag)
 
 
-setup(cmdclass={"bdist_wheel": bdist_wheel})
+setup(cmdclass={"bdist_wheel": bdist_wheel, "build_py": build_py})
