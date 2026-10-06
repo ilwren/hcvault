@@ -23,7 +23,7 @@ x64 / x86 / ARM64 and macOS arm64 (best effort: the macOS native library
 is otherwise untested - a wheel only ships after its smoke test passes):
 
 ```bash
-pip install hcvault-1.4.0-py3-none-manylinux_2_34_x86_64.whl
+pip install hcvault-1.4.1-py3-none-manylinux_2_34_x86_64.whl
 ```
 
 Or build one from a repository checkout (it bundles whatever native

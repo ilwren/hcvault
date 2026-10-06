@@ -20,7 +20,7 @@ linux-x64（glibc 2.34+）、Windows x64 / x86 / ARM64 与 macOS arm64
 （尽力构建：macOS 原生库未经测试——wheel 只有通过冒烟测试才会发布）：
 
 ```bash
-pip install hcvault-1.4.0-py3-none-manylinux_2_34_x86_64.whl
+pip install hcvault-1.4.1-py3-none-manylinux_2_34_x86_64.whl
 ```
 
 或在仓库检出中自行构建（`native/runtimes/` 下有哪些平台的库就打进去哪些；

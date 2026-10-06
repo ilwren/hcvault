@@ -9,7 +9,7 @@ name: build-demos
 #                          it. Nothing is published.
 #   manual run           - full release build, published as a GitHub Release:
 #     (Actions tab ->      Actions -> build-demos -> Run workflow -> enter
-#      "Run workflow")     the version tag, e.g. v1.4.0 (must match the
+#      "Run workflow")     the version tag, e.g. v1.4.1 (must match the
 #                          version in the project files).
 #
 # Release contents:
@@ -34,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version tag (e.g. v1.4.0) - must match the version in the project files'
+        description: 'Release version tag (e.g. v1.4.1) - must match the version in the project files'
         required: true
         type: string
 
@@ -517,12 +517,12 @@ jobs:
           set -e
           tag="$RELEASE_TAG"
 
-          # sanity: well-formed tag, e.g. v1.4.0 or v1.4.0-beta.1
+          # sanity: well-formed tag, e.g. v1.4.1 or v1.4.1-beta.1
           printf '%s' "$tag" | grep -Eq '^v[0-9]+(\.[0-9]+)*(-[A-Za-z0-9.]+)?$' \
-              || { echo "invalid tag '$tag' (expected e.g. v1.4.0)"; exit 1; }
+              || { echo "invalid tag '$tag' (expected e.g. v1.4.1)"; exit 1; }
 
           # the tag must match the version the packages were built from -
-          # a v1.5.0 release containing 1.4.0 packages would be confusing
+          # a v1.5.0 release containing 1.4.1 packages would be confusing
           core_pkg=$(find artifacts/nuget-package -name 'HCVault.Core.*.nupkg' | head -n1)
           native_pkg=$(find artifacts/nuget-package -name 'HCVault.Native.*.nupkg' | head -n1)
           core_ver=$(basename "$core_pkg" .nupkg); core_ver=${core_ver#HCVault.Core.}

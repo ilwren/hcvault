@@ -15,6 +15,16 @@ follows semantic versioning.
   and a linux-x64 tar.gz (both built and required in CI) plus a best-effort
   macos-arm64 tar.gz. No .NET runtime is needed to run them.
 
+- **Fixed: Android per-ABI publish failure (NU1101).** Publishing the MAUI
+  demo for a 32-bit ABI (`dotnet publish -r android-arm` / `-r android-x86`)
+  failed while restoring `HCVault.Core`: a plain library restored with an
+  Android RID derives its .NET 8 runtime pack from the RID graph's parent
+  RID (`linux-bionic-*`), and the 32-bit variants of those packages were
+  never published to nuget.org. The library now drops those (nonexistent,
+  and unnecessary - Android apps get their managed runtime from the
+  Android workload) `PackageDownload` items during restore (workaround from
+  dotnet/android#8170), verified with `dotnet restore -r android-arm/-x86`
+  against the exact failure. The 64-bit ABIs keep restoring as before.
 - **New: Native AOT compatibility.** `HCVault.Core` builds with
   `IsAotCompatible` (the interop layer is entirely source-generated
   `[LibraryImport]` bindings and the code uses no reflection). Verified by

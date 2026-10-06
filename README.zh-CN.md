@@ -76,7 +76,7 @@ VeraCrypt 本来的东西，不是重新实现。
 | 卷格式 | 创建 V2（当前版）；打开 V2 和旧版 V1；普通卷 + 隐藏卷。与官方 VeraCrypt 互通（Argon2id 卷需对方为 2016 年后的版本） |
 | 原生核心 | Windows x64 / x86 / ARM64（MSVC）、Linux x64（GCC/Clang）、Android arm64-v8a / armeabi-v7a / x86 / x86_64（API 21+，NDK r26/r27，16KB 页对齐）。macOS 可编译但未测试 |
 | 托管封装 | .NET 8 与 .NET 10（`net8.0;net10.0`），兼容 Native AOT |
-| Python 包 | 1.4.0 — Python 3.8+（纯 ctypes，零依赖；wheel 内含原生库，CI 产出 linux-x64） |
+| Python 包 | 1.4.1 — Python 3.8+（纯 ctypes，零依赖；wheel 内含原生库，CI 产出 linux-x64） |
 | 演示程序 | HCVault.Explorer：Avalonia UI（Windows x64 / linux-x64 / macOS arm64），以 Native AOT 单文件发布。MAUI（Android 7.0 / API 24+）、纯 .NET Android（Android 5.0 / API 21+） |
 | 基于版本 | VeraCrypt 1.26.29、FatFs R0.15 |
 
@@ -176,7 +176,7 @@ MAUI 演示另需 `maui-android` 工作负载。
 封装一遍，另有 Native AOT 冒烟一遍）：
 [.github/workflows/build-demos.yml](.github/workflows/build-demos.yml)。
 版本发布手动触发：Actions → build-demos → Run workflow → 填入版本标签
-（如 `v1.4.0`，需与项目内的版本号一致）。该次运行会构建全部平台，并把
+（如 `v1.4.1`，需与项目内的版本号一致）。该次运行会构建全部平台，并把
 编译产物附到 GitHub Release：Avalonia 演示的 Native AOT 单文件可执行
 （win-x64 zip、linux-x64 / macos-arm64 tar.gz——无需 .NET 运行时，macOS
 尽力构建）、MAUI 演示的逐 ABI APK、Android 5.0 通用演示 APK、两个

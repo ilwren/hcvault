@@ -15,7 +15,7 @@
 
     <!-- NuGet packaging (source-only: build offline, then `dotnet pack`) -->
     <PackageId>HCVault.Core</PackageId>
-    <Version>1.4.0</Version>
+    <Version>1.4.1</Version>
     <Authors>HCVault</Authors>
     <Description>
       Managed wrapper around the VeraCrypt volume core: create, open, read and write
@@ -41,6 +41,25 @@
   <ItemGroup>
     <None Include="nuget-icon.png" Pack="true" PackagePath="\" />
   </ItemGroup>
+
+  <!--
+    Restoring this LIBRARY with an Android RID (dotnet publish -r android-arm
+    on a consuming app) derives the .NET 8 runtime pack from the RID graph's
+    parent RID: linux-bionic-*. For the 32-bit ABIs those packages were never
+    published to nuget.org (Microsoft.NETCore.App.Runtime.linux-bionic-arm /
+    -x86 do not exist), which fails the whole app restore with NU1101.
+    Android apps get their managed runtime from the Android workload, so
+    these pack downloads are pointless: drop them (workaround from
+    dotnet/android#8170). The 64-bit variants exist and keep restoring.
+  -->
+  <Target Name="RemoveNonexistentAndroidRuntimePackDownloads"
+          AfterTargets="ProcessFrameworkReferences"
+          Condition="'$(RuntimeIdentifier)' != '' or '$(RuntimeIdentifiers)' != ''">
+    <ItemGroup>
+      <PackageDownload Remove="Microsoft.NETCore.App.Runtime.linux-bionic-arm" />
+      <PackageDownload Remove="Microsoft.NETCore.App.Runtime.linux-bionic-x86" />
+    </ItemGroup>
+  </Target>
 
   <!--
     The native library is a peer package (HCVault.Native). We intentionally do

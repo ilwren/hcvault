@@ -34,7 +34,7 @@ from .filesystem import ExFatFile, ExFatFileSystem, FileInfo
 from .password import SecurePassword
 from .volume import Volume
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 __all__ = [
     "ExFatFile",

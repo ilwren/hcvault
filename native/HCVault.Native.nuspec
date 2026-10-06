@@ -20,7 +20,7 @@
       (x64) and Android (arm64-v8a/armeabi-v7a/x86/x86_64). Build from the
       repository sources with CMake if you need another platform.
     </description>
-    <releaseNotes>1.4.0: vcapi v4 — adds vc_exfat_get_space (total/free/cluster bytes of a mounted exFAT filesystem). Binaries must be rebuilt from 1.4.0 sources (older hcvault-core builds report API version 3 and are rejected by HCVault.Core 1.4.0).</releaseNotes>
+    <releaseNotes>1.4.1: vcapi v4 — adds vc_exfat_get_space (total/free/cluster bytes of a mounted exFAT filesystem). Binaries must be rebuilt from 1.4.1 sources (older hcvault-core builds report API version 3 and are rejected by HCVault.Core 1.4.1).</releaseNotes>
     <copyright>Copyright VeraCrypt contributors; TrueCrypt Foundation; 2026 packaging</copyright>
     <tags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2;native</tags>
   </metadata>
