@@ -226,8 +226,19 @@ if [ "$DO_PACK" = 1 ]; then
     [ -f "$NATIVE/runtimes/linux-x64/native/libhcvault-core.so" ] || { echo "linux-x64 library missing (this run builds it if --skip-native is off)"; miss=1; }
     [ -f "$NATIVE/runtimes/android-arm64/native/libhcvault-core.so" ] || { echo "android libraries missing - run ./build.sh --android first"; miss=1; }
     [ "$miss" = 0 ] || exit 1
-    dotnet pack "$NATIVE/HCVault.Native.pack.csproj" -c Release
-    dotnet pack "$ROOT/managed/HCVault.Core" -c Release
+    # the packages must carry the URL of the repository they are built
+    # from (CI passes it explicitly; locally derive it from the git origin)
+    repo_url="${PACK_REPO_URL:-$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')}"
+    if [ -z "$repo_url" ]; then
+        echo "cannot determine the repository URL - no git remote 'origin'." >&2
+        echo "set PACK_REPO_URL=https://github.com/<owner>/<repo> and retry" >&2
+        exit 1
+    fi
+    echo "  repository url: $repo_url"
+    dotnet pack "$NATIVE/HCVault.Native.pack.csproj" -c Release \
+        -p:ProjectUrl="$repo_url" -p:RepositoryUrl="$repo_url.git"
+    dotnet pack "$ROOT/managed/HCVault.Core" -c Release \
+        -p:PackageProjectUrl="$repo_url" -p:RepositoryUrl="$repo_url.git"
     echo '  -> native/bin/Release/*.nupkg + managed/HCVault.Core/bin/Release/*.nupkg'
 fi
 

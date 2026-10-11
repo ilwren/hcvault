@@ -131,6 +131,11 @@ Filesystem limits: the built-in FAT formatter needs roughly ≥ 1 MiB; exFAT
 needs ≥ 4 MiB. Below that, create with `Filesystem.None` and use
 `Volume.OpenStream` — or format the data area yourself.
 
+`Volume.CreateAsync(options, cancellationToken)` runs the same creation on
+a thread-pool thread for `await`-based callers. The token only prevents a
+creation that has not started yet — the native formatting itself cannot be
+interrupted.
+
 ### Opening volumes
 
 `Volume.Open(VolumeOpenOptions)` runs the header KDF once per attempt —
@@ -159,6 +164,8 @@ Properties of an open `Volume`:
 | `Pim` | the PIM this handle was opened with |
 | `IsHidden` | true if this handle opened the hidden volume inside the container |
 | `IsOpen` | false after `Dispose` |
+
+`Volume.OpenAsync(options)` is the awaitable counterpart of `Open`.
 
 ### Sector-level I/O
 
@@ -189,6 +196,8 @@ opens with the old credentials is the one re-encrypted.
 
 Close any open `Volume` handles on the same file first — the operation
 opens the file exclusively.
+
+`Volume.ChangePasswordAsync(options)` is the awaitable counterpart.
 
 ### Hidden volumes
 
@@ -263,6 +272,28 @@ Writing a 1 MiB file decreases `FreeBytes` by exactly 1 MiB (rounded up to
 whole clusters), deleting it restores the value. On exFAT the numbers come
 from FatFs (`f_getfree`, allocation-bitmap scan); on FAT they are computed
 from the in-memory FAT table.
+
+### Sizing a container
+
+`ContainerSize` answers sizing questions exactly, using the same geometry
+the bundled formatters produce (256 KiB of volume headers, FAT/exFAT tables
+and system clusters, automatic cluster-size steps):
+
+| Method | Returns |
+|---|---|
+| `GetFileCapacity(containerSizeBytes, filesystem)` | the largest single file a freshly created container of that size can hold |
+| `GetRequiredContainerSize(fileSizeBytes, filesystem)` | the smallest container (multiple of 512, ≥ 200 KiB) that can hold one file of that size |
+
+```csharp
+long container = ContainerSize.GetRequiredContainerSize(
+    700L * 1000 * 1000, VcFilesystem.Fat);   // smallest FAT container for a 700 MB file
+long capacity  = ContainerSize.GetFileCapacity(container, VcFilesystem.Fat);   // >= 700,000,000
+```
+
+The values are exact for the formatter versions shipped in the native
+library — the test suite creates real volumes at the computed sizes and
+matches the free space byte for byte. `VcFilesystem.None` reduces to the
+raw data-area size (container minus 256 KiB of headers).
 
 ### Errors
 

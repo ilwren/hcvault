@@ -15,7 +15,7 @@
 
     <!-- NuGet packaging (source-only: build offline, then `dotnet pack`) -->
     <PackageId>HCVault.Core</PackageId>
-    <Version>1.4.1</Version>
+    <Version>1.5.0</Version>
     <Authors>HCVault</Authors>
     <Description>
       Managed wrapper around the VeraCrypt volume core: create, open, read and write
@@ -26,7 +26,10 @@
     </Description>
     <PackageTags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2</PackageTags>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/hcvault/hcvault</PackageProjectUrl>
+    <!-- PackageProjectUrl / RepositoryUrl are passed at pack time
+         (-p:PackageProjectUrl=... -p:RepositoryUrl=...), so a package always
+         carries the URL of the repository it was actually built from. -->
+    <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageIcon>nuget-icon.png</PackageIcon>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>

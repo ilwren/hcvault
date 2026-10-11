@@ -417,9 +417,23 @@ if ($Pack) {
         throw "No prebuilt native libraries for: $($missing -join ', '). The package ships binaries, so build them first: .\build.ps1 -Arch All -Android (and see docs for linux-x64)."
     }
 
-    dotnet pack (Join-Path $native 'HCVault.Native.pack.csproj') -c Release
+    # the packages must carry the URL of the repository they are built
+    # from (CI passes it explicitly; locally derive it from the git origin)
+    $repoUrl = $env:PACK_REPO_URL
+    if (-not $repoUrl) {
+        $origin = @(git -C $root remote get-url origin 2>$null)
+        if ($origin.Count -gt 0 -and $origin[0]) {
+            $repoUrl = ($origin[0] -replace '^git@([^:]+):', 'https://$1/') -replace '\.git$', ''
+        }
+    }
+    if (-not $repoUrl) {
+        throw "Cannot determine the repository URL (no git remote 'origin'). Set PACK_REPO_URL=https://github.com/<owner>/<repo> and retry."
+    }
+    Write-Host "  repository url: $repoUrl"
+
+    dotnet pack (Join-Path $native 'HCVault.Native.pack.csproj') -c Release "-p:ProjectUrl=$repoUrl" "-p:RepositoryUrl=$repoUrl.git"
     if ($LASTEXITCODE) { exit 1 }
-    dotnet pack (Join-Path $root 'managed\HCVault.Core') -c Release
+    dotnet pack (Join-Path $root 'managed\HCVault.Core') -c Release "-p:PackageProjectUrl=$repoUrl" "-p:RepositoryUrl=$repoUrl.git"
     if ($LASTEXITCODE) { exit 1 }
     Write-Host '  -> native\bin\Release\*.nupkg + managed\...\bin\Release\*.nupkg' -ForegroundColor Green
 }

@@ -106,4 +106,14 @@ public sealed partial class Volume
             GC.KeepAlive(cb);
         }
     }
+
+    /// <summary>
+    ///   <see cref="Create"/> as a thread-pool task, so UI threads stay
+    ///   responsive during the header-key derivation (Argon2) and the data
+    ///   write. The native call itself is not cancellable - the token only
+    ///   prevents a run that has not started yet. The progress callback fires
+    ///   on the worker thread; marshal to your own context as needed.
+    /// </summary>
+    public static Task CreateAsync(VolumeCreationOptions options, CancellationToken cancellationToken = default)
+        => Task.Run(() => Create(options), cancellationToken);
 }

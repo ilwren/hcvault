@@ -109,5 +109,5 @@ NTFS 生态互通"的硬需求，建议：**整体观望**；如确需，降级�
 - 卷创建：`vc_create_volume` 的 `filesystem` 参数增加 `"EXFAT"`；路线 B 在 native 层
   由 FatFs `f_mkfs` 完成，路线 A 在托管层经 `OpenStream` 写（native 不动）。
 - 托管层：新增 `ExFatVolume`（或 `FatFsVolume` 包装），与 `FatVolume` 同一抽象
-  （都吃 `Volume` 的扇区流）；WPF Explorer 无需改动（只依赖 ListDirectory/Read/Write/Delete）。
+  （都吃 `Volume` 的扇区流）；Avalonia 演示无需改动（只依赖 ListDirectory/Read/Write/Delete）。
 - 测试：exFAT 读写往返 + 用真实 mkfs.exfat 生成的镜像做交叉验证。

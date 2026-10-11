@@ -54,4 +54,13 @@ public sealed partial class Volume
 
         Status.ThrowIfFailed(status);
     }
+
+    /// <summary>
+    ///   <see cref="ChangePassword"/> as a thread-pool task (re-derives the
+    ///   header key). The native call is not cancellable - the token only
+    ///   prevents a run that has not started yet. Close open handles on the
+    ///   volume first; the operation opens the file exclusively.
+    /// </summary>
+    public static Task ChangePasswordAsync(ChangePasswordOptions options, CancellationToken cancellationToken = default)
+        => Task.Run(() => ChangePassword(options), cancellationToken);
 }

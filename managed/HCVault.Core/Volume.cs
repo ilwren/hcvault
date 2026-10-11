@@ -38,6 +38,15 @@ public sealed partial class Volume : IDisposable
     /// <summary>Native vc_volume handle — for the exFAT bridge (same assembly only).</summary>
     internal IntPtr NativeHandle => H;
 
+    /// <summary>
+    ///   <see cref="Open"/> as a thread-pool task (the header-key derivation
+    ///   takes seconds with Argon2). The native call is not cancellable - the
+    ///   token only prevents a run that has not started yet. The returned
+    ///   volume follows the usual rule: one thread at a time.
+    /// </summary>
+    public static Task<Volume> OpenAsync(VolumeOpenOptions options, CancellationToken cancellationToken = default)
+        => Task.Run(() => Open(options), cancellationToken);
+
     /// <summary>Open a volume with password + optional keyfiles + optional PIM.</summary>
     public static Volume Open(VolumeOpenOptions options)
     {

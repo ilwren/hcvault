@@ -348,6 +348,154 @@ Check("exFAT space: total/free/used track allocation exactly", () =>
 xfs?.Dispose();
 xvol?.Dispose();
 
+// ------------------------------------------------- container size + async
+Check("container size: exact fit + predicted fresh free space", () =>
+{
+    foreach (var (fs, need) in new[] {
+                 (VcFilesystem.Fat, 12_345_678L),
+                 (VcFilesystem.ExFat, 12_345_678L),
+                 (VcFilesystem.Fat, 5L * 1024 * 1024 + 123),
+                 (VcFilesystem.ExFat, 5L * 1024 * 1024 + 123) })
+    {
+        long size = ContainerSize.GetRequiredContainerSize(need, fs);
+        Console.WriteLine($"       need {need} B ({fs}) -> container {size} B");
+        if (ContainerSize.GetFileCapacity(size - 512, fs) >= need)
+            throw new Exception("a 512-byte smaller container claims to fit as well");
+        if (ContainerSize.GetFileCapacity(size, fs) < need)
+            throw new Exception("computed container cannot fit the file");
+
+        string p = Path.Combine(dir, $"fit-{fs}-{need}.hc");
+        using (var pw = SecurePassword.FromText("fit-pw"))
+            Volume.Create(new VolumeCreationOptions
+                { Path = p, SizeBytes = size, Password = pw, Filesystem = fs, Quick = true });
+
+        using (var pw = SecurePassword.FromText("fit-pw"))
+        using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw }))
+        using (var f = VolumeFilesystem.Mount(vol))
+        {
+            var space = f.GetSpace();
+            long predicted = ContainerSize.GetFileCapacity(size, fs);
+            Console.WriteLine($"       fresh free {space.FreeBytes}, predicted {predicted} (cluster {space.ClusterBytes} B)");
+            if ((long)space.FreeBytes != predicted)
+                throw new Exception($"geometry mismatch ({fs}): fresh free {space.FreeBytes} != predicted {predicted}");
+
+            f.WriteFile("\\fit.bin", RandomBytes((int)need));
+            if (f.ReadFile("\\fit.bin").Length != need)
+                throw new Exception("readback mismatch");
+        }
+    }
+});
+
+Check("container size: geometry across cluster-size boundaries (FAT32 / exFAT 32K)", () =>
+{
+    // 100 MiB FAT -> FAT32 (1 KiB clusters); 140 MiB exFAT -> 32 KiB clusters
+    foreach (var (fs, size) in new[] {
+                 (VcFilesystem.Fat, 100L * 1024 * 1024),
+                 (VcFilesystem.ExFat, 140L * 1024 * 1024) })
+    {
+        string p = Path.Combine(dir, $"geo-{fs}.hc");
+        using (var pw = SecurePassword.FromText("geo-pw"))
+            Volume.Create(new VolumeCreationOptions
+                { Path = p, SizeBytes = size, Password = pw, Filesystem = fs, Quick = true });
+
+        using (var pw = SecurePassword.FromText("geo-pw"))
+        using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw }))
+        using (var f = VolumeFilesystem.Mount(vol))
+        {
+            var space = f.GetSpace();
+            long predicted = ContainerSize.GetFileCapacity(size, fs);
+            Console.WriteLine($"       {fs}, {size >> 20} MiB: fresh free {space.FreeBytes}, " +
+                              $"predicted {predicted} (cluster {space.ClusterBytes} B)");
+            if ((long)space.FreeBytes != predicted)
+                throw new Exception($"geometry mismatch ({fs}): {space.FreeBytes} != {predicted}");
+        }
+    }
+});
+
+Check("FAT16: on-disk FAT uses 16-bit entries (VeraCrypt-readable layout)", () =>
+{
+    // 6 MiB -> FAT16, 1 KiB clusters, 2 FATs, 23-sector FAT, 512 root entries
+    string p = Path.Combine(dir, "fat16-raw.hc");
+    using (var pw = SecurePassword.FromText("raw-pw"))
+        Volume.Create(new VolumeCreationOptions
+            { Path = p, SizeBytes = 6L * 1024 * 1024, Password = pw, Filesystem = VcFilesystem.Fat, Quick = true });
+
+    using (var pw = SecurePassword.FromText("raw-pw"))
+    using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw }))
+    {
+        long predicted = ContainerSize.GetFileCapacity(6L * 1024 * 1024, VcFilesystem.Fat);
+        using (var f = VolumeFilesystem.Mount(vol))
+        {
+            var space = f.GetSpace();
+            Console.WriteLine($"       fresh free {space.FreeBytes}, predicted {predicted}");
+            if ((long)space.FreeBytes != predicted)
+                throw new Exception($"fresh free {space.FreeBytes} != predicted {predicted}");
+            f.WriteFile("\\one-cluster.txt", new byte[1000]);
+        }
+
+        // raw boot sector + first FAT copy, as any external FAT driver would see them
+        using var raw = vol.OpenStream(writable: false);
+        var boot = new byte[512];
+        raw.ReadExactly(boot);
+        uint bps = (uint)(boot[11] | (boot[12] << 8));
+        uint spc = boot[13];
+        uint reserved = (uint)(boot[14] | (boot[15] << 8));
+        uint fats = boot[16];
+        uint rootEntries = (uint)(boot[17] | (boot[18] << 8));
+        uint fatLength = (uint)(boot[22] | (boot[23] << 8));
+        Console.WriteLine($"       bps={bps} spc={spc} reserved={reserved} fats={fats} " +
+                          $"rootEntries={rootEntries} fatLength={fatLength}");
+        if (bps != 512 || spc != 2 || reserved != 2 || fats != 2 || rootEntries != 512 || fatLength != 23)
+            throw new Exception("unexpected FAT16 boot-sector geometry");
+
+        var fat = new byte[8];
+        raw.Seek(reserved * bps, SeekOrigin.Begin);
+        raw.ReadExactly(fat);
+        // entry 0/1: media descriptor + EOF; entry 2: the file's single cluster -> EOF (0xFFF8)
+        uint e0 = (uint)(fat[0] | (fat[1] << 8));
+        uint e1 = (uint)(fat[2] | (fat[3] << 8));
+        uint e2 = (uint)(fat[4] | (fat[5] << 8));
+        Console.WriteLine($"       raw FAT16 entries: [{e0:X4}] [{e1:X4}] [{e2:X4}]");
+        if (e0 != 0xFFF8 || e1 != 0xFFFF || e2 != 0xFFF8)
+            throw new Exception($"FAT entries are not 16-bit EOF markers: {e0:X4} {e1:X4} {e2:X4}");
+
+        using (var f = VolumeFilesystem.Mount(vol))
+        {
+            if (f.ReadFile("\\one-cluster.txt").Length != 1000)
+                throw new Exception("readback mismatch after raw inspection");
+            var space = f.GetSpace();
+            if ((long)space.FreeBytes != predicted - 1024)
+                throw new Exception($"free did not drop by exactly one cluster: {space.FreeBytes}");
+        }
+    }
+});
+
+Check("async: create / open / change password as tasks", () =>
+{
+    string p = Path.Combine(dir, "async.hc");
+    using (var pw = SecurePassword.FromText("async-pw"))
+        Volume.CreateAsync(new VolumeCreationOptions
+        {
+            Path = p, SizeBytes = 2L * 1024 * 1024,
+            Password = pw, Filesystem = VcFilesystem.Fat, Quick = true,
+        }).GetAwaiter().GetResult();
+
+    var vol = Volume.OpenAsync(new VolumeOpenOptions { Path = p, Password = SecurePassword.FromText("async-pw") })
+        .GetAwaiter().GetResult();
+    Console.WriteLine($"       opened via task: {vol.CipherName}, {vol.DataSize} B data area");
+    vol.Dispose();
+
+    using (var pw = SecurePassword.FromText("async-pw"))
+        Volume.ChangePasswordAsync(new ChangePasswordOptions
+        {
+            Path = p, OldPassword = pw, NewPassword = SecurePassword.FromText("rotated-async"),
+        }).GetAwaiter().GetResult();
+
+    using var v2 = Volume.OpenAsync(new VolumeOpenOptions { Path = p, Password = SecurePassword.FromText("rotated-async") })
+        .GetAwaiter().GetResult();
+    Console.WriteLine("       password rotated via task; reopened with new credentials");
+});
+
 // ------------------------------------------------------------------- summary
 Console.WriteLine();
 if (failures.Count == 0)

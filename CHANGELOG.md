@@ -4,6 +4,46 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/) and the project
 follows semantic versioning.
 
+## 1.5.0 — 2026-10-11
+
+- **New: container-size helpers.** `ContainerSize.GetFileCapacity` and
+  `ContainerSize.GetRequiredContainerSize` compute exactly how large a file
+  a given container can hold - or how small a container can be for a given
+  file (FAT, exFAT or raw). The math mirrors the bundled formatters
+  (VeraCrypt's FatFormatter and FatFs's exFAT format: header regions,
+  FAT/exFAT tables, system clusters, automatic cluster-size steps); the
+  managed test suite cross-checks the model against real volumes byte for
+  byte, including that a container 512 bytes below the computed size no
+  longer fits the file.
+
+- **New: async API.** `Volume.CreateAsync`, `Volume.OpenAsync` and
+  `Volume.ChangePasswordAsync` run the native operations on thread-pool
+  threads for `await`-based callers. The cancellation tokens only prevent
+  an operation that has not started yet - the native calls themselves
+  cannot be interrupted.
+
+- **Fixed: FAT16 volumes were encoded as FAT12.** The managed FAT driver
+  decoded and wrote FAT16 volumes (FAT containers with data areas of
+  roughly 4-64 MiB) with the 12-bit FAT12 entry codec: free space on a
+  fresh volume was reported one cluster short, and file chains written
+  back through the managed driver were packed in a nonstandard on-disk
+  layout. FAT16 now uses standard 16-bit entries, verified at the
+  raw-sector level to match what VeraCrypt and OS FAT drivers expect.
+  Volumes only read (or formatted by VeraCrypt / OS tools) are unaffected
+  and now decode correctly; files written through HCVault.Core 1.4.0 or
+  earlier into that size range should be re-imported, as their FAT chains
+  are stored in the old 12-bit layout.
+
+- **Packaging: real repository URLs and NuGet trusted publishing.** Both
+  NuGet packages now carry the URL of the repository they were built from:
+  CI injects the GitHub context at pack time, the build scripts derive it
+  from the git origin (or `PACK_REPO_URL`), and `dotnet pack` without a
+  URL fails fast instead of shipping a placeholder. A new `publish-nuget`
+  workflow job pushes both packages to nuget.org via trusted publishing
+  (OIDC - no long-lived API key; requires a one-time policy registration
+  on nuget.org and the `NUGET_USER` secret). The native library itself is
+  unchanged from 1.4.0.
+
 ## 1.4.0 — 2026-09-26
 
 - **The desktop demo is now an Avalonia app published with Native AOT.**

@@ -126,6 +126,10 @@ catch (VcWrongPasswordException) { /* 重新询问 / 放弃 */ }
 更小的卷请用 `Filesystem.None` + `Volume.OpenStream`，或自行格式化
 数据区。
 
+`Volume.CreateAsync(options, cancellationToken)` 把同样的创建放到线程池
+线程上执行，供 `await` 调用方使用。取消令牌只能阻止尚未开始的创建——
+原生格式化过程本身无法中断。
+
 ### 打开卷
 
 `Volume.Open(VolumeOpenOptions)` 每次尝试跑一遍头部 KDF——**密码错误
@@ -154,6 +158,8 @@ Argon2id 卷在对方是 2016 年后的 VeraCrypt 才能打开。
 | `IsHidden` | 本句柄打开的是容器内的隐藏卷时为 true |
 | `IsOpen` | `Dispose` 后为 false |
 
+`Volume.OpenAsync(options)` 是 `Open` 的可等待版本。
+
 ### 扇区级 I/O
 
 - `ReadSectors(buffer, offset, length)` / `WriteSectors(…)`——原生裸
@@ -181,6 +187,8 @@ Argon2id 卷在对方是 2016 年后的 VeraCrypt 才能打开。
 
 先关闭同一文件上所有打开的 `Volume` 句柄——该操作以独占方式打开
 文件。
+
+`Volume.ChangePasswordAsync(options)` 是对应的可等待版本。
 
 ### 隐藏卷
 
@@ -251,6 +259,26 @@ Unicode 文件名（FAT 走 LFN，exFAT 是 UTF-8）。
 写入 1 MiB 文件，`FreeBytes` 恰好减少 1 MiB（按整簇取整），删除后恢
 复原值。exFAT 的数字来自 FatFs（`f_getfree`，分配位图扫描）；FAT 由
 内存中的 FAT 表现算。
+
+### 计算容器大小
+
+`ContainerSize` 精确回答容量问题，几何口径与内置格式化器完全一致
+（256 KiB 卷头、FAT/exFAT 表与系统簇、自动簇大小）：
+
+| 方法 | 返回值 |
+|---|---|
+| `GetFileCapacity(containerSizeBytes, filesystem)` | 该大小的全新容器能容纳的单个最大文件 |
+| `GetRequiredContainerSize(fileSizeBytes, filesystem)` | 能容纳该大小单个文件的最小容器（512 的倍数，≥ 200 KiB） |
+
+```csharp
+long container = ContainerSize.GetRequiredContainerSize(
+    700L * 1000 * 1000, VcFilesystem.Fat);   // 装 700 MB 文件的最小 FAT 容器
+long capacity  = ContainerSize.GetFileCapacity(container, VcFilesystem.Fat);   // >= 700,000,000
+```
+
+数值对原生库内置的格式化器版本精确成立——测试套件会按算出的尺寸真实
+建卷并逐字节核对剩余空间。`VcFilesystem.None` 即裸数据区大小（容器减去
+256 KiB 卷头）。
 
 ### 错误
 

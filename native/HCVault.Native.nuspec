@@ -6,9 +6,9 @@
     <title>HCVault Native (hcvault-core)</title>
     <authors>HCVault contributors</authors>
     <license type="expression">Apache-2.0</license>
-    <projectUrl>https://github.com/hcvault/hcvault</projectUrl>
+    <projectUrl>$projectUrl$</projectUrl>
     <icon>nuget-icon.png</icon>
-    <iconUrl>https://raw.githubusercontent.com/hcvault/hcvault/main/assets/nuget-icon.png</iconUrl>
+    <readme>PACKAGE-README.md</readme>
     <requireLicenseAcceptance>false</requireLicenseAcceptance>
     <description>
       Prebuilt native libraries (hcvault-core) used by HCVault.Core: a portable
@@ -20,9 +20,10 @@
       (x64) and Android (arm64-v8a/armeabi-v7a/x86/x86_64). Build from the
       repository sources with CMake if you need another platform.
     </description>
-    <releaseNotes>1.4.1: vcapi v4 — adds vc_exfat_get_space (total/free/cluster bytes of a mounted exFAT filesystem). Binaries must be rebuilt from 1.4.1 sources (older hcvault-core builds report API version 3 and are rejected by HCVault.Core 1.4.1).</releaseNotes>
+    <releaseNotes>1.5.0: no native changes - version-aligned with HCVault.Core 1.5.0 (container-size helpers, async API, FAT16 on-disk fix); the binaries are identical to 1.4.0 and interoperate with it.</releaseNotes>
     <copyright>Copyright VeraCrypt contributors; TrueCrypt Foundation; 2026 packaging</copyright>
     <tags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2;native</tags>
+    <repository type="git" url="$repositoryUrl$" />
   </metadata>
   <files>
     <!-- build integration + docs + license -->

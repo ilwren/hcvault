@@ -22,12 +22,13 @@ public sealed class FatVolume : IVolumeFileSystem
     private readonly uint _fatSectors;
     private readonly uint _rootDirSectors; // FAT12/16 only; 0 for FAT32
     private readonly uint _rootCluster;    // FAT32 only
+    private readonly bool _isFat16;
     private readonly bool _isFat32;
     private readonly Stream _stream;
 
     private FatVolume(Volume volume, Stream stream, int bytesPerSector, int sectorsPerCluster,
         uint clusterCount, uint firstDataSector, uint fatStartSector, uint fatSectors,
-        uint rootDirSectors, uint rootCluster, bool isFat32, uint[] fat)
+        uint rootDirSectors, uint rootCluster, bool isFat16, bool isFat32, uint[] fat)
     {
         _volume = volume;
         _stream = stream;
@@ -40,6 +41,7 @@ public sealed class FatVolume : IVolumeFileSystem
         _fatSectors = fatSectors;
         _rootDirSectors = rootDirSectors;
         _rootCluster = rootCluster;
+        _isFat16 = isFat16;
         _isFat32 = isFat32;
         _fat = fat;
     }
@@ -98,6 +100,12 @@ public sealed class FatVolume : IVolumeFileSystem
             for (int i = 0; i < fat.Length; i++)
                 fat[i] = ReadU32(fatBytes, i * 4) & 0x0FFFFFFFu;
         }
+        else if (clusterCount >= 4085) // FAT16
+        {
+            fat = new uint[fatBytes.Length / 2];
+            for (int i = 0; i < fat.Length; i++)
+                fat[i] = ReadU16(fatBytes, i * 2);
+        }
         else
         {
             fat = new uint[fatBytes.Length * 2 / 3]; // FAT12 entries
@@ -107,8 +115,9 @@ public sealed class FatVolume : IVolumeFileSystem
 
         uint rootCluster = isFat32 ? (ReadU32(boot, 44) == 0 ? 2 : ReadU32(boot, 44)) : 0;
 
+        bool isFat16 = !isFat32 && clusterCount >= 4085;
         return new FatVolume(volume, stream, bps, spc, clusterCount, firstDataSector,
-            fatStart, fatSectors, rootDirSectors, rootCluster, isFat32, fat);
+            fatStart, fatSectors, rootDirSectors, rootCluster, isFat16, isFat32, fat);
     }
 
     // ------------------------------------------------------------ public API
@@ -357,6 +366,11 @@ public sealed class FatVolume : IVolumeFileSystem
             for (int i = 0; i < _fat.Length && i * 4 + 4 <= fatBytes; i++)
                 WriteU32(copy, i * 4, _fat[i]);
         }
+        else if (_isFat16)
+        {
+            for (int i = 0; i < _fat.Length && i * 2 + 2 <= fatBytes; i++)
+                WriteU16(copy, i * 2, _fat[i]);
+        }
         else
         {
             for (uint i = 0; i < _fat.Length; i++)
@@ -368,6 +382,11 @@ public sealed class FatVolume : IVolumeFileSystem
             _stream.Seek((long)(_fatStartSector + f * _fatSectors) * _bytesPerSector, SeekOrigin.Begin);
             _stream.Write(copy, 0, fatBytes);
         }
+    }
+
+    private static void WriteU16(byte[] b, int o, uint v)
+    {
+        b[o] = (byte)v; b[o + 1] = (byte)(v >> 8);
     }
 
     private static void WriteU32(byte[] b, int o, uint v)
