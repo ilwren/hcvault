@@ -430,13 +430,12 @@ jobs:
         run: .\build.ps1 -Arch All -SkipManaged -NoDownload
 
       - name: Pack (both NuGet packages)
+        # this job runs on Windows: the default shell is PowerShell, so no
+        # bash-style line continuations here - keep each dotnet call on one line
         run: |
-          dotnet pack native/HCVault.Native.pack.csproj -c Release \
-            -p:ProjectUrl="${{ github.server_url }}/${{ github.repository }}" \
-            -p:RepositoryUrl="${{ github.server_url }}/${{ github.repository }}.git"
-          dotnet pack managed/HCVault.Core -c Release \
-            -p:PackageProjectUrl="${{ github.server_url }}/${{ github.repository }}" \
-            -p:RepositoryUrl="${{ github.server_url }}/${{ github.repository }}.git" 
+          $repoUrl = '${{ github.server_url }}/${{ github.repository }}'
+          dotnet pack native/HCVault.Native.pack.csproj -c Release "-p:ProjectUrl=$repoUrl" "-p:RepositoryUrl=${repoUrl}.git"
+          dotnet pack managed/HCVault.Core -c Release "-p:PackageProjectUrl=$repoUrl" "-p:RepositoryUrl=${repoUrl}.git"
 
       - uses: actions/upload-artifact@v4
         with:
