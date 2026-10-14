@@ -14,7 +14,7 @@
          -p:ProjectUrl/-p:RepositoryUrl from the github context so the
          published package always points at the repository it was built
          from; pass them manually for local packs). -->
-    <NuspecProperties>version=1.5.0;projectUrl=$(ProjectUrl);repositoryUrl=$(RepositoryUrl)</NuspecProperties>
+    <NuspecProperties>version=1.6.0;projectUrl=$(ProjectUrl);repositoryUrl=$(RepositoryUrl)</NuspecProperties>
     <IsPackable>true</IsPackable>
     <NoBuild>true</NoBuild>
     <IncludeBuildOutput>false</IncludeBuildOutput>
