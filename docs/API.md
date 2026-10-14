@@ -21,8 +21,12 @@ open volume (or mounted filesystem) belongs to one thread at a time.
 
 ```bash
 dotnet add package HCVault.Core     # the wrapper (net8.0 + net10.0)
-dotnet add package HCVault.Native   # prebuilt native libraries (runtimes/ layout)
 ```
+
+`HCVault.Core` depends on the exact matching `HCVault.Native` version, so
+installing it pulls the prebuilt native libraries (runtimes/ layout) in
+automatically; reference `HCVault.Native` explicitly only to force a
+different version.
 
 Build your application with a `RuntimeIdentifier` (`-r linux-x64`,
 `-r win-x64`, …) and the matching `hcvault-core` binary is copied to the
@@ -116,6 +120,7 @@ worker thread in UI applications.
 | `Password` | `SecurePassword` | required | may be empty if keyfiles carry the entropy |
 | `Pim` | `int` | 0 | 0 = library default; a custom PIM must be re-supplied on every open |
 | `KeyFiles` | `IReadOnlyList<string>` | empty | mixed into the password **in list order**, exactly like the VeraCrypt application |
+| `KeyFileStreams` | `IReadOnlyList<Stream>?` | null | keyfile contents as streams (or wrap bytes in a `MemoryStream`) instead of / in addition to paths; see below |
 | `Cipher` | `VcCipher` | `Aes` | any of the 15 cascades |
 | `Kdf` | `VcKdf` | `Argon2id` | header key derivation |
 | `Filesystem` | `VcFilesystem` | `Fat` | `Fat`, `ExFat` or `None` (raw sectors) |
@@ -130,6 +135,15 @@ Progress stages (`VcCreationStage`): `WritingData` → `WritingBackupHeader`
 Filesystem limits: the built-in FAT formatter needs roughly ≥ 1 MiB; exFAT
 needs ≥ 4 MiB. Below that, create with `Filesystem.None` and use
 `Volume.OpenStream` — or format the data area yourself.
+
+**Keyfile streams.** When `KeyFileStreams` is non-empty, the keyfile mixing
+happens in this library instead of the native core: each stream is read (not
+disposed), only its first 1 MiB is mixed in, and the `KeyFiles` paths are read
+as regular files first, then the streams, in list order. The result is
+byte-identical to native keyfile paths (the test suite verifies both
+directions), so volumes created either way open with either form. Unlike the
+path-only mode, directory entries are not expanded — every source must be a
+file or stream. At least one byte per source is required.
 
 `Volume.CreateAsync(options, cancellationToken)` runs the same creation on
 a thread-pool thread for `await`-based callers. The token only prevents a
@@ -147,6 +161,7 @@ including on a wrong password (that is what makes guessing expensive).
 | `Password` | `SecurePassword` | required | |
 | `Pim` | `int` | 0 | must match the value used at creation |
 | `KeyFiles` | `IReadOnlyList<string>` | empty | same files, same order as at creation |
+| `KeyFileStreams` | `IReadOnlyList<Stream>?` | null | stream form of the same keyfiles (see the note under *Creating volumes*) |
 | `ReadOnly` | `bool` | `false` | write-protected handle (reads and `GetSpace` still work) |
 | `UseBackupHeader` | `bool` | `false` | try the embedded backup header first — use when the primary header is damaged |
 
@@ -191,6 +206,7 @@ opens with the old credentials is the one re-encrypted.
 |---|---|
 | `OldPassword` / `OldPim` / `OldKeyFiles` | current credentials |
 | `NewPassword` / `NewPim` / `NewKeyFiles` | replacement (all optional individually) |
+| `OldKeyFileStreams` / `NewKeyFileStreams` | stream form of the keyfiles, one list per side (see *Creating volumes*) |
 | `NewKdf` | `null` keeps the current KDF, otherwise switch (e.g. to `Argon2id`) |
 | `WipeCount` | header wipe passes, default 1 |
 
@@ -247,8 +263,10 @@ Header KDFs (`VcKdf`): `HmacSha512` (classic default), `HmacSha256`,
 data area without a recognized filesystem throws `VcException` (e.g.
 `Filesystem.None` volumes).
 
-Paths are rooted, `"\\file.txt"` or `"/file.txt"`, either separator,
-Unicode names supported (LFN on FAT, UTF-8 on exFAT).
+Paths accept `\\` or `/` interchangeably, and the leading separator is
+optional — `"file.txt"`, `"/file.txt"` and `"\\file.txt"` are the same
+file, `"docs/note.txt"` addresses a subdirectory, and `""` (or `"/"`) is
+the root. Unicode names are supported (LFN on FAT, UTF-8 on exFAT).
 
 | Member | Behavior |
 |---|---|
@@ -272,6 +290,27 @@ Writing a 1 MiB file decreases `FreeBytes` by exactly 1 MiB (rounded up to
 whole clusters), deleting it restores the value. On exFAT the numbers come
 from FatFs (`f_getfree`, allocation-bitmap scan); on FAT they are computed
 from the in-memory FAT table.
+
+### Import and export
+
+Extension methods on `IVolumeFileSystem` move files and whole directory
+trees between the host and the volume:
+
+| Method | Effect |
+|---|---|
+| `ImportFile(localPath, volumePath = null)` | copy one local file in; the default target is the volume root with the same file name |
+| `ExportFile(volumePath, localPath)` | copy one file out (local parent directories are created) |
+| `ImportDirectory(localDir, volumePath = "\\")` | copy a local directory tree in (target and missing parents are created; subdirectories first, then files, sorted by name) |
+| `ExportDirectory(volumePath, localDir)` | copy a directory tree out |
+
+```csharp
+using var vol = Volume.Open(new VolumeOpenOptions { Path = "vault.hc", Password = pw });
+using var fs = VolumeFilesystem.Mount(vol);
+fs.ImportDirectory(@"C:\Users\me\Documents");     // -> \\Documents\...
+fs.ExportDirectory("\\Documents", @"D:\restore\Documents");
+```
+
+Files are transferred whole (one file fully in memory at a time).
 
 ### Sizing a container
 

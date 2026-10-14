@@ -31,6 +31,16 @@ public sealed class VolumeCreationOptions
     /// <summary>Keyfiles whose contents are mixed into the password (apply in this order).</summary>
     public IReadOnlyList<string> KeyFiles { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    ///   Keyfile contents supplied directly (streams are read, not owned).
+    ///   Applied after the <see cref="KeyFiles" /> paths; only the first
+    ///   1 MiB per source is mixed in, exactly like VeraCrypt. When this
+    ///   list is non-empty, the mixing happens in this library and the
+    ///   paths in <see cref="KeyFiles" /> must be regular files (no
+    ///   directory expansion).
+    /// </summary>
+    public IReadOnlyList<Stream>? KeyFileStreams { get; init; }
+
     public VcCipher Cipher { get; init; } = VcCipher.Aes;
 
     public VcKdf Kdf { get; init; } = VcKdf.Argon2id;
@@ -70,6 +80,12 @@ public sealed partial class Volume
             throw new VcArgumentException("Hidden volume size must be at least 200 KiB.");
 
         var keyfiles = options.KeyFiles.ToArray();
+        SecurePassword? mixed = null;
+        if (options.KeyFileStreams is { Count: > 0 })
+        {
+            mixed = KeyfileMixer.Apply(options.Password, options.KeyFiles, options.KeyFileStreams);
+            keyfiles = Array.Empty<string>();
+        }
 
         NativeMethods.VcProgressCallback? cb = null;
         try
@@ -80,10 +96,11 @@ public sealed partial class Volume
                 cb = (done, total, stage, _) => box(new CreationProgress(done, total, (VcCreationStage)stage));
             }
 
+            SecurePassword password = mixed ?? options.Password;
             int status = NativeMethods.vc_create_volume(
                 options.Path,
                 (ulong)options.SizeBytes,
-                options.Password.Span, options.Password.Length,
+                password.Span, password.Length,
                 keyfiles, (nuint)keyfiles.Length,
                 options.Cipher.ToNative(),
                 options.Kdf.ToNative(),
@@ -103,6 +120,7 @@ public sealed partial class Volume
         }
         finally
         {
+            mixed?.Dispose();
             GC.KeepAlive(cb);
         }
     }

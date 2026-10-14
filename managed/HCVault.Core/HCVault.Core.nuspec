@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/08/nuspec.xsd">
+  <metadata>
+    <id>HCVault.Core</id>
+    <version>$version$</version>
+    <title>HCVault.Core</title>
+    <authors>HCVault contributors</authors>
+    <license type="expression">Apache-2.0</license>
+    <projectUrl>$projectUrl$</projectUrl>
+    <icon>nuget-icon.png</icon>
+    <readme>README.md</readme>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <description>
+      Managed wrapper around the VeraCrypt volume core: create, open, read and
+      write VeraCrypt encrypted containers (normal and hidden volumes, all
+      cipher/KDF combinations, keyfiles, PIM) without mounting them. Pulls in
+      the matching HCVault.Native package (prebuilt native libraries for
+      Windows, Linux and Android) automatically; build your own from the
+      repository sources with CMake if you need another platform.
+    </description>
+    <releaseNotes>1.6.0: keyfile streams (keyfile contents as byte/Stream sources instead of file paths), folder import/export helpers, path forms without a leading separator, and an automatic dependency on the matching HCVault.Native package.</releaseNotes>
+    <copyright>Copyright VeraCrypt contributors; TrueCrypt Foundation; 2026 packaging</copyright>
+    <tags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2</tags>
+    <repository type="git" url="$repositoryUrl$" />
+    <!--
+      The native libraries ship as the HCVault.Native package; the dependency
+      is exact on purpose - wrapper and native core are released in lockstep.
+      Reference HCVault.Native explicitly to force a different version.
+    -->
+    <dependencies>
+      <group targetFramework="net8.0">
+        <dependency id="HCVault.Native" version="[$version$]" />
+      </group>
+      <group targetFramework="net10.0">
+        <dependency id="HCVault.Native" version="[$version$]" />
+      </group>
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="bin/$configuration$/net8.0/HCVault.Core.dll" target="lib/net8.0" />
+    <file src="bin/$configuration$/net8.0/HCVault.Core.xml" target="lib/net8.0" />
+    <file src="bin/$configuration$/net10.0/HCVault.Core.dll" target="lib/net10.0" />
+    <file src="bin/$configuration$/net10.0/HCVault.Core.xml" target="lib/net10.0" />
+    <file src="nuget-icon.png" target="" />
+    <file src="../../README.md" target="" />
+  </files>
+</package>

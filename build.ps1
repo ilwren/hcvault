@@ -433,7 +433,7 @@ if ($Pack) {
 
     dotnet pack (Join-Path $native 'HCVault.Native.pack.csproj') -c Release "-p:ProjectUrl=$repoUrl" "-p:RepositoryUrl=${repoUrl}.git"
     if ($LASTEXITCODE) { exit 1 }
-    dotnet pack (Join-Path $root 'managed\HCVault.Core') -c Release "-p:PackageProjectUrl=$repoUrl" "-p:RepositoryUrl=${repoUrl}.git"
+    dotnet pack (Join-Path $root 'managed\HCVault.Core') -c Release "-p:ProjectUrl=$repoUrl" "-p:RepositoryUrl=${repoUrl}.git"
     if ($LASTEXITCODE) { exit 1 }
     Write-Host '  -> native\bin\Release\*.nupkg + managed\...\bin\Release\*.nupkg' -ForegroundColor Green
 }

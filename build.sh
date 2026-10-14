@@ -238,7 +238,7 @@ if [ "$DO_PACK" = 1 ]; then
     dotnet pack "$NATIVE/HCVault.Native.pack.csproj" -c Release \
         -p:ProjectUrl="$repo_url" -p:RepositoryUrl="$repo_url.git"
     dotnet pack "$ROOT/managed/HCVault.Core" -c Release \
-        -p:PackageProjectUrl="$repo_url" -p:RepositoryUrl="$repo_url.git"
+        -p:ProjectUrl="$repo_url" -p:RepositoryUrl="$repo_url.git"
     echo '  -> native/bin/Release/*.nupkg + managed/HCVault.Core/bin/Release/*.nupkg'
 fi
 

@@ -4,6 +4,35 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/) and the project
 follows semantic versioning.
 
+## 1.6.0 — 2026-10-14
+
+- **New: keyfile streams.** `KeyFileStreams` on `VolumeCreationOptions`,
+  `VolumeOpenOptions` and (as `OldKeyFileStreams` / `NewKeyFileStreams`)
+  `ChangePasswordOptions` accepts keyfile contents directly as streams -
+  wrap a `byte[]` in a `MemoryStream` for the byte form - instead of, or in
+  addition to, file paths. The mixing is a byte-exact managed port of
+  VeraCrypt's algorithm (1 MiB processed per source, CRC-32 based), verified
+  bidirectionally against the native implementation in the test suite.
+  Directory expansion stays a path-only feature.
+
+- **New: folder import / export.** `ImportFile`, `ExportFile`,
+  `ImportDirectory` and `ExportDirectory` on the filesystem layer move
+  single files or whole directory trees between the host and a volume,
+  preserving names, Unicode and empty directories.
+
+- **Simpler paths.** Volume paths no longer require a leading separator:
+  `"file.txt"`, `"docs/note.txt"` and the classic `"\\file.txt"` forms
+  all work, on both FAT and exFAT (the exFAT bridge now also accepts an
+  empty path as the volume root).
+
+- **Packaging: HCVault.Core now depends on the exact matching HCVault.Native
+  version.** Installing `HCVault.Core` pulls the prebuilt native libraries
+  in automatically (verified: a plain console app with a single
+  `PackageReference` builds, copies `libhcvault-core` to its output and
+  creates volumes). The metadata moved into a checked-in nuspec; building
+  the library itself stays dependency-free and offline. Reference
+  `HCVault.Native` explicitly only to force a different version.
+
 ## 1.5.0 — 2026-10-11
 
 - **New: container-size helpers.** `ContainerSize.GetFileCapacity` and

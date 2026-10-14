@@ -19,8 +19,11 @@ Python 用户可以直接用 [python/](../python/README.zh-CN.md) 里现成的
 
 ```bash
 dotnet add package HCVault.Core     # 托管封装（net8.0 + net10.0）
-dotnet add package HCVault.Native   # 预编译原生库（runtimes/ 布局）
 ```
+
+`HCVault.Core` 精确依赖同版本的 `HCVault.Native`，安装时会自动带上
+预编译原生库（runtimes/ 布局）；只有想强制别的版本时才需要显式引用
+`HCVault.Native`。
 
 构建应用时带 `RuntimeIdentifier`（`-r linux-x64`、`-r win-x64` …），
 对应的 `hcvault-core` 二进制会自动复制到输出目录；Android 上打包进
@@ -111,6 +114,7 @@ catch (VcWrongPasswordException) { /* 重新询问 / 放弃 */ }
 | `Password` | `SecurePassword` | 必填 | 可为空（密钥文件提供熵） |
 | `Pim` | `int` | 0 | 0 = 库默认；自定义 PIM 以后每次打开都要提供 |
 | `KeyFiles` | `IReadOnlyList<string>` | 空 | 按列表顺序混入密码，与 VeraCrypt 程序一致 |
+| `KeyFileStreams` | `IReadOnlyList<Stream>?` | null | 以流（或用 `MemoryStream` 包字节）代替/补充路径传入密钥内容，见下文 |
 | `Cipher` | `VcCipher` | `Aes` | 15 种级联任选 |
 | `Kdf` | `VcKdf` | `Argon2id` | 头部密钥推导 |
 | `Filesystem` | `VcFilesystem` | `Fat` | `Fat`、`ExFat` 或 `None`（裸扇区） |
@@ -125,6 +129,13 @@ catch (VcWrongPasswordException) { /* 重新询问 / 放弃 */ }
 文件系统限制：内置 FAT 格式化器大约需要 ≥ 1 MiB；exFAT 需要 ≥ 4 MiB。
 更小的卷请用 `Filesystem.None` + `Volume.OpenStream`，或自行格式化
 数据区。
+
+**密钥流。** `KeyFileStreams` 非空时，密钥混合在本库内完成而非原生
+核心：每个流只读前 1 MiB（流本身不会被释放）；`KeyFiles` 里的路径先
+按普通文件读入，然后才是各流，按列表顺序。结果与原生密钥路径**逐字
+节一致**（测试套件双向验证过），两种形式创建的卷可互换打开。与纯路
+径模式不同：此模式不展开目录——每个来源必须是文件或流；每个来源至
+少要有 1 字节。
 
 `Volume.CreateAsync(options, cancellationToken)` 把同样的创建放到线程池
 线程上执行，供 `await` 调用方使用。取消令牌只能阻止尚未开始的创建——
@@ -141,6 +152,7 @@ catch (VcWrongPasswordException) { /* 重新询问 / 放弃 */ }
 | `Password` | `SecurePassword` | 必填 | |
 | `Pim` | `int` | 0 | 必须与创建时一致 |
 | `KeyFiles` | `IReadOnlyList<string>` | 空 | 同一批文件、同一顺序 |
+| `KeyFileStreams` | `IReadOnlyList<Stream>?` | null | 同一批密钥的流形式（说明见“创建卷”） |
 | `ReadOnly` | `bool` | `false` | 只读句柄（读取和 `GetSpace` 不受影响） |
 | `UseBackupHeader` | `bool` | `false` | 优先尝试内嵌备份头——主头损坏时使用 |
 
@@ -182,6 +194,7 @@ Argon2id 卷在对方是 2016 年后的 VeraCrypt 才能打开。
 |---|---|
 | `OldPassword` / `OldPim` / `OldKeyFiles` | 现有凭据 |
 | `NewPassword` / `NewPim` / `NewKeyFiles` | 新凭据（各项可单独不改） |
+| `OldKeyFileStreams` / `NewKeyFileStreams` | 两侧各自的密钥流形式（说明见“创建卷”） |
 | `NewKdf` | `null` 保持当前 KDF，否则切换（如切到 `Argon2id`） |
 | `WipeCount` | 头部擦除遍数，默认 1 |
 
@@ -235,8 +248,10 @@ Volume.Create(new VolumeCreationOptions { Path = "outer.hc", SizeBytes = 16 << 2
 FatFs）或 `FatVolume`（托管实现）；数据区没有可识别文件系统时抛
 `VcException`（如 `Filesystem.None` 的卷）。
 
-路径是根路径，`"\\file.txt"` 或 `"/file.txt"`，两种分隔符都行，支持
-Unicode 文件名（FAT 走 LFN，exFAT 是 UTF-8）。
+路径两种分隔符通用，且前导分隔符可省略——`"file.txt"`、`"/file.txt"`
+与 `"\\file.txt"` 是同一个文件，`"docs/note.txt"` 定位子目录，`""`
+（或 `"/"`）是根目录。支持 Unicode 文件名（FAT 走 LFN，exFAT 是
+UTF-8）。
 
 | 成员 | 行为 |
 |---|---|
@@ -259,6 +274,27 @@ Unicode 文件名（FAT 走 LFN，exFAT 是 UTF-8）。
 写入 1 MiB 文件，`FreeBytes` 恰好减少 1 MiB（按整簇取整），删除后恢
 复原值。exFAT 的数字来自 FatFs（`f_getfree`，分配位图扫描）；FAT 由
 内存中的 FAT 表现算。
+
+### 导入与导出
+
+`IVolumeFileSystem` 上的扩展方法，在宿主文件系统与卷之间搬运单个文
+件或整棵目录树：
+
+| 方法 | 作用 |
+|---|---|
+| `ImportFile(localPath, volumePath = null)` | 导入一个本地文件；默认目标为卷根目录下同名文件 |
+| `ExportFile(volumePath, localPath)` | 导出一个文件（本地父目录自动创建） |
+| `ImportDirectory(localDir, volumePath = "\\")` | 递归导入本地目录树（目标目录及缺失的父目录自动创建；先子目录后文件，按名称排序） |
+| `ExportDirectory(volumePath, localDir)` | 递归导出目录树 |
+
+```csharp
+using var vol = Volume.Open(new VolumeOpenOptions { Path = "vault.hc", Password = pw });
+using var fs = VolumeFilesystem.Mount(vol);
+fs.ImportDirectory(@"C:\Users\me\Documents");     // -> \\Documents\...
+fs.ExportDirectory("\\Documents", @"D:\restore\Documents");
+```
+
+文件按整体传输（同一时刻一个文件完整在内存中）。
 
 ### 计算容器大小
 

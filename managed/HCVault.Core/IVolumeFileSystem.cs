@@ -12,7 +12,11 @@ namespace HCVault.Core;
 /// </summary>
 public interface IVolumeFileSystem : IDisposable
 {
-    /// <summary>Entries of a directory (paths rooted with '\' or '/').</summary>
+    /// <summary>
+    ///   Entries of a directory. Paths use '\' or '/' interchangeably; a
+    ///   leading separator is optional (relative to the volume root), and
+    ///   "" or "\" denotes the root itself.
+    /// </summary>
     IReadOnlyList<FatEntry> ListDirectory(string path);
 
     /// <summary>Read a whole file into memory.</summary>

@@ -235,6 +235,8 @@ namespace VeraCryptNet
 			}
 			while (p.size () >= 2 && p[0] == '/' && p[1] == '/')
 				p.erase (0, 1);
+			if (p.empty ())
+				p = "/";	// the volume root
 			return p;
 		}
 	}

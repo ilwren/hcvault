@@ -13,37 +13,18 @@
     <IsAotCompatible>true</IsAotCompatible>
     <ImplicitUsings>enable</ImplicitUsings>
 
-    <!-- NuGet packaging (source-only: build offline, then `dotnet pack`) -->
-    <PackageId>HCVault.Core</PackageId>
-    <Version>1.5.0</Version>
-    <Authors>HCVault</Authors>
-    <Description>
-      Managed wrapper around the VeraCrypt volume core: create, open, read and write
-      VeraCrypt encrypted containers (normal and hidden volumes, all cipher/KDF
-      combinations, keyfiles, PIM) without mounting them. Reference the
-      HCVault.Native package for the prebuilt native libraries (or build them
-      from the repository sources with CMake).
-    </Description>
-    <PackageTags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2</PackageTags>
-    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <!-- PackageProjectUrl / RepositoryUrl are passed at pack time
-         (-p:PackageProjectUrl=... -p:RepositoryUrl=...), so a package always
-         carries the URL of the repository it was actually built from. -->
-    <RepositoryType>git</RepositoryType>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageIcon>nuget-icon.png</PackageIcon>
+    <!-- NuGet packaging: the metadata lives in the checked-in
+         HCVault.Core.nuspec (like the native package), so the nupkg can
+         depend on the exact matching HCVault.Native version while this
+         project itself stays dependency-free and builds offline.
+         Pack (CI/scripts pass the real repository URL):
+           dotnet pack -c Release -p:ProjectUrl=... -p:RepositoryUrl=... -->
+    <Version>1.6.0</Version>
+    <NuspecFile>HCVault.Core.nuspec</NuspecFile>
+    <NuspecProperties>version=$(Version);projectUrl=$(ProjectUrl);repositoryUrl=$(RepositoryUrl);configuration=$(Configuration)</NuspecProperties>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
-    <PackAsTool>false</PackAsTool>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" Link="README.md" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="nuget-icon.png" Pack="true" PackagePath="\" />
-  </ItemGroup>
 
   <!--
     Restoring this LIBRARY with an Android RID (dotnet publish -r android-arm
@@ -65,9 +46,11 @@
   </Target>
 
   <!--
-    The native library is a peer package (HCVault.Native). We intentionally do
-    NOT hard-reference it here so this package stays dependency-free; at runtime
-    the loader probes (in order):
+    The prebuilt native libraries ship as the HCVault.Native package. The
+    packaged nupkg declares an exact dependency on it (see HCVault.Core.nuspec),
+    but this project does not reference it as a PackageReference, so building
+    and testing here stays offline and always uses the locally built library.
+    At runtime the loader probes (in order):
       1. $VCNATIVE_HOME (directory or full library path)
       2. the application directory
       3. the application directory's runtimes/{rid}/native

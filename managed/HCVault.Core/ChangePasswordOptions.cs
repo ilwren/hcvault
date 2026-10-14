@@ -11,9 +11,15 @@ public sealed class ChangePasswordOptions
     public int OldPim { get; init; }
     public IReadOnlyList<string> OldKeyFiles { get; init; } = Array.Empty<string>();
 
+    /// <summary>Keyfile contents for the OLD credentials (see VolumeCreationOptions.KeyFileStreams).</summary>
+    public IReadOnlyList<Stream>? OldKeyFileStreams { get; init; }
+
     public required SecurePassword NewPassword { get; init; }
     public int NewPim { get; init; }
     public IReadOnlyList<string> NewKeyFiles { get; init; } = Array.Empty<string>();
+
+    /// <summary>Keyfile contents for the NEW credentials (see VolumeCreationOptions.KeyFileStreams).</summary>
+    public IReadOnlyList<Stream>? NewKeyFileStreams { get; init; }
 
     /// <summary>Switch the header KDF; null keeps the volume's current KDF.</summary>
     public VcKdf? NewKdf { get; init; }
@@ -41,18 +47,41 @@ public sealed partial class Volume
         var oldKeys = options.OldKeyFiles.ToArray();
         var newKeys = options.NewKeyFiles.ToArray();
 
-        int status = NativeMethods.vc_change_password(
-            options.Path,
-            options.OldPassword.Span, options.OldPassword.Length,
-            oldKeys, (nuint)oldKeys.Length,
-            options.OldPim,
-            options.NewPassword.Span, options.NewPassword.Length,
-            newKeys, (nuint)newKeys.Length,
-            options.NewPim,
-            options.NewKdf?.ToNative(),
-            options.WipeCount);
+        SecurePassword? mixedOld = null;
+        if (options.OldKeyFileStreams is { Count: > 0 })
+        {
+            mixedOld = KeyfileMixer.Apply(options.OldPassword, options.OldKeyFiles, options.OldKeyFileStreams);
+            oldKeys = Array.Empty<string>();
+        }
+        SecurePassword? mixedNew = null;
+        if (options.NewKeyFileStreams is { Count: > 0 })
+        {
+            mixedNew = KeyfileMixer.Apply(options.NewPassword, options.NewKeyFiles, options.NewKeyFileStreams);
+            newKeys = Array.Empty<string>();
+        }
 
-        Status.ThrowIfFailed(status);
+        try
+        {
+            SecurePassword oldPassword = mixedOld ?? options.OldPassword;
+            SecurePassword newPassword = mixedNew ?? options.NewPassword;
+            int status = NativeMethods.vc_change_password(
+                options.Path,
+                oldPassword.Span, oldPassword.Length,
+                oldKeys, (nuint)oldKeys.Length,
+                options.OldPim,
+                newPassword.Span, newPassword.Length,
+                newKeys, (nuint)newKeys.Length,
+                options.NewPim,
+                options.NewKdf?.ToNative(),
+                options.WipeCount);
+
+            Status.ThrowIfFailed(status);
+        }
+        finally
+        {
+            mixedOld?.Dispose();
+            mixedNew?.Dispose();
+        }
     }
 
     /// <summary>

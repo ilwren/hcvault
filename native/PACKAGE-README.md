@@ -16,10 +16,11 @@ The package follows the standard NuGet `runtimes/` layout:
 
 ## Usage
 
-Reference `HCVault.Core` (the managed wrapper) plus this package, and build
-your application with a `RuntimeIdentifier` — the matching library is copied
-to your output (or packaged into the APK `lib/<abi>/` on Android) and found
-by the wrapper's loader automatically.
+Reference `HCVault.Core` (the managed wrapper) and build your application
+with a `RuntimeIdentifier` — `HCVault.Core` depends on this package, so the
+matching library is pulled in automatically, copied to your output (or
+packaged into the APK `lib/<abi>/` on Android) and found by the wrapper's
+loader. Reference this package explicitly only to force a different version.
 
 Building without a `RuntimeIdentifier` copies no native library; either set
 one (`-r linux-x64` …), place the library next to the application manually,

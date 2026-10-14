@@ -15,6 +15,16 @@ public sealed class VolumeOpenOptions
 
     public IReadOnlyList<string> KeyFiles { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    ///   Keyfile contents supplied directly (streams are read, not owned).
+    ///   Applied after the <see cref="KeyFiles" /> paths; only the first
+    ///   1 MiB per source is mixed in, exactly like VeraCrypt. When this
+    ///   list is non-empty, the mixing happens in this library and the
+    ///   paths in <see cref="KeyFiles" /> must be regular files (no
+    ///   directory expansion).
+    /// </summary>
+    public IReadOnlyList<Stream>? KeyFileStreams { get; init; }
+
     public bool ReadOnly { get; init; }
 
     /// <summary>Try the embedded backup header first (damaged primary header).</summary>
@@ -57,18 +67,33 @@ public sealed partial class Volume : IDisposable
         HCVaultLibrary.Initialize();
 
         var keyfiles = options.KeyFiles.ToArray();
-        IntPtr handle = NativeMethods.vc_open_volume(
-            options.Path,
-            options.Password.Span, options.Password.Length,
-            keyfiles, (nuint)keyfiles.Length,
-            options.Pim,
-            options.ReadOnly ? 1 : 0,
-            options.UseBackupHeader ? 1 : 0);
+        SecurePassword? mixed = null;
+        if (options.KeyFileStreams is { Count: > 0 })
+        {
+            mixed = KeyfileMixer.Apply(options.Password, options.KeyFiles, options.KeyFileStreams);
+            keyfiles = Array.Empty<string>();
+        }
 
-        if (handle == IntPtr.Zero)
-            throw Status.ToException(NativeMethods.vc_last_status());
+        try
+        {
+            SecurePassword password = mixed ?? options.Password;
+            IntPtr handle = NativeMethods.vc_open_volume(
+                options.Path,
+                password.Span, password.Length,
+                keyfiles, (nuint)keyfiles.Length,
+                options.Pim,
+                options.ReadOnly ? 1 : 0,
+                options.UseBackupHeader ? 1 : 0);
 
-        return new Volume(new VolumeHandle(handle));
+            if (handle == IntPtr.Zero)
+                throw Status.ToException(NativeMethods.vc_last_status());
+
+            return new Volume(new VolumeHandle(handle));
+        }
+        finally
+        {
+            mixed?.Dispose();
+        }
     }
 
     // ------------------------------------------------------------- properties

@@ -496,6 +496,172 @@ Check("async: create / open / change password as tasks", () =>
     Console.WriteLine("       password rotated via task; reopened with new credentials");
 });
 
+// ------------------------------------------------------- keyfile streams
+Check("keyfiles: stream sources mix exactly like native keyfile paths", () =>
+{
+    string kfDir = Path.Combine(dir, "kfs");
+    Directory.CreateDirectory(kfDir);
+    // 1 byte / 100 KB / >1 MiB (exercises the 1 MiB cap), all random
+    string kf1 = Path.Combine(kfDir, "kf1.bin"); File.WriteAllBytes(kf1, new byte[] { 0x5A });
+    string kf2 = Path.Combine(kfDir, "kf2.bin"); File.WriteAllBytes(kf2, RandomBytes(100_000));
+    string kf3 = Path.Combine(kfDir, "kf3.bin"); File.WriteAllBytes(kf3, RandomBytes(1024 * 1024 + 4096));
+    string[] paths = { kf1, kf2, kf3 };
+    Func<List<Stream>> sources = () => new List<Stream>
+    {
+        new MemoryStream(File.ReadAllBytes(kf1)),
+        new MemoryStream(File.ReadAllBytes(kf2)),
+        new MemoryStream(File.ReadAllBytes(kf3)),
+    };
+    const VcKdf fastKdf = VcKdf.HmacSha512;
+
+    // create with paths -> open with streams
+    string p = Path.Combine(dir, "kfs.hc");
+    using (var pw = SecurePassword.FromText("hunter2"))
+        Volume.Create(new VolumeCreationOptions
+            { Path = p, SizeBytes = 2L * 1024 * 1024, Password = pw,
+              KeyFiles = paths, Kdf = fastKdf, Quick = true });
+    using (var pw = SecurePassword.FromText("hunter2"))
+    using (var vol = Volume.Open(new VolumeOpenOptions
+            { Path = p, Password = pw, KeyFileStreams = sources() }))
+        Console.WriteLine($"       opened a path-created volume with stream keyfiles ({vol.DataSize} B)");
+
+    // create with streams -> open with paths (the reverse differential)
+    using (var pw = SecurePassword.FromText("hunter2"))
+        Volume.Create(new VolumeCreationOptions
+            { Path = p, SizeBytes = 2L * 1024 * 1024, Password = pw,
+              KeyFileStreams = sources(), Kdf = fastKdf, Quick = true });
+    using (var pw = SecurePassword.FromText("hunter2"))
+    using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw, KeyFiles = paths }))
+        Console.WriteLine("       opened a stream-created volume with keyfile paths");
+
+    // combined: one path + two streams, mixed in this library
+    using (var pw = SecurePassword.FromText("hunter2"))
+        Volume.Create(new VolumeCreationOptions
+            { Path = p, SizeBytes = 2L * 1024 * 1024, Password = pw,
+              KeyFiles = new[] { kf1 }, KeyFileStreams = sources().Skip(1).ToList(),
+              Kdf = fastKdf, Quick = true });
+    using (var pw = SecurePassword.FromText("hunter2"))
+    using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw, KeyFiles = paths }))
+        Console.WriteLine("       combined path+stream mixing matches the pure-path order");
+
+    // wrong keyfile set -> rejected
+    using (var pw = SecurePassword.FromText("hunter2"))
+    {
+        var partialSources = new List<Stream> { new MemoryStream(File.ReadAllBytes(kf1)) };
+        try
+        {
+            using var vol = Volume.Open(new VolumeOpenOptions
+                { Path = p, Password = pw, KeyFileStreams = partialSources });
+            throw new Exception("a wrong keyfile set was accepted");
+        }
+        catch (VcWrongPasswordException) { Console.WriteLine("       wrong keyfile set rejected"); }
+    }
+
+    // empty stream -> argument error
+    using (var pw = SecurePassword.FromText("hunter2"))
+    {
+        try
+        {
+            using var vol = Volume.Open(new VolumeOpenOptions
+                { Path = p, Password = pw,
+                  KeyFileStreams = new List<Stream> { new MemoryStream() } });
+            throw new Exception("an empty keyfile stream was accepted");
+        }
+        catch (VcArgumentException) { Console.WriteLine("       empty keyfile stream rejected"); }
+    }
+
+    // rotate credentials with stream keyfiles on the old side
+    using (var pw = SecurePassword.FromText("hunter2"))
+        Volume.ChangePassword(new ChangePasswordOptions
+        {
+            Path = p, OldPassword = pw, OldKeyFileStreams = sources(),
+            NewPassword = SecurePassword.FromText("plain-new"),
+        });
+    using (var pw = SecurePassword.FromText("plain-new"))
+    using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw }))
+        Console.WriteLine("       rotated from stream keyfiles to a plain password");
+});
+
+// ---------------------------------------------------------- path handling
+Check("paths: relative, forward slashes, optional leading separator (FAT + exFAT)", () =>
+{
+    foreach (var fs in new[] { VcFilesystem.Fat, VcFilesystem.ExFat })
+    {
+        string p = Path.Combine(dir, $"paths-{fs}.hc");
+        using (var pw = SecurePassword.FromText("path-pw"))
+            Volume.Create(new VolumeCreationOptions
+                { Path = p, SizeBytes = 4L * 1024 * 1024, Password = pw,
+                  Filesystem = fs, Kdf = VcKdf.HmacSha512, Quick = true });
+
+        using (var pw = SecurePassword.FromText("path-pw"))
+        using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw }))
+        using (var f = VolumeFilesystem.Mount(vol))
+        {
+            f.WriteFile("hello.txt", "rel"u8.ToArray());                    // relative, no separator
+            f.CreateDirectory("docs");
+            f.WriteFile("docs/note.txt", "fwd"u8.ToArray());                // forward slashes
+            f.WriteFile("\\docs\\other.txt", "back"u8.ToArray());       // classic rooted form
+
+            if (Encoding.UTF8.GetString(f.ReadFile("hello.txt")) != "rel") throw new Exception("relative read failed");
+            if (Encoding.UTF8.GetString(f.ReadFile("/docs//note.txt")) != "fwd") throw new Exception("normalized read failed");
+            if (Encoding.UTF8.GetString(f.ReadFile("docs/other.txt")) != "back") throw new Exception("cross-form read failed");
+
+            var rootNames = f.ListDirectory("").Select(e => e.Name).OrderBy(n => n).ToList();
+            if (!rootNames.SequenceEqual(new[] { "docs", "hello.txt" })) throw new Exception($"root listing wrong: {string.Join(",", rootNames)}");
+            var docs = f.ListDirectory("/docs").Select(e => e.Name).OrderBy(n => n).ToList();
+            if (!docs.SequenceEqual(new[] { "note.txt", "other.txt" })) throw new Exception($"docs listing wrong: {string.Join(",", docs)}");
+        }
+        Console.WriteLine($"       {fs}: relative / forward-slash / no-root forms all work");
+    }
+});
+
+// ---------------------------------------------------------- import/export
+Check("import/export: directory round-trip (FAT + exFAT)", () =>
+{
+    string src = Path.Combine(dir, "tree");
+    Directory.CreateDirectory(Path.Combine(src, "data", "sub"));
+    byte[] big = RandomBytes(64 * 1024);
+    File.WriteAllBytes(Path.Combine(src, "readme.md"), "readme"u8.ToArray());
+    File.WriteAllBytes(Path.Combine(src, "data", "sub", "a.bin"), big);
+    File.WriteAllBytes(Path.Combine(src, "data", "sub", "\u6d4b\u8bd5\u6587\u4ef6.txt"), "unicode"u8.ToArray());
+    Directory.CreateDirectory(Path.Combine(src, "empty-dir"));
+
+    foreach (var fs in new[] { VcFilesystem.Fat, VcFilesystem.ExFat })
+    {
+        string p = Path.Combine(dir, $"tree-{fs}.hc");
+        using (var pw = SecurePassword.FromText("tree-pw"))
+            Volume.Create(new VolumeCreationOptions
+                { Path = p, SizeBytes = 8L * 1024 * 1024, Password = pw,
+                  Filesystem = fs, Kdf = VcKdf.HmacSha512, Quick = true });
+
+        using (var pw = SecurePassword.FromText("tree-pw"))
+        using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw }))
+        using (var f = VolumeFilesystem.Mount(vol))
+        {
+            // single file, default target (volume root)
+            f.ImportFile(Path.Combine(src, "readme.md"));
+            if (Encoding.UTF8.GetString(f.ReadFile("\\readme.md")) != "readme") throw new Exception("ImportFile default path failed");
+
+            // whole tree
+            f.ImportDirectory(src, "\\backup");
+            f.ExportFile("backup/data/sub/a.bin", Path.Combine(dir, "exported-single.bin"));
+            if (!File.ReadAllBytes(Path.Combine(dir, "exported-single.bin")).SequenceEqual(big))
+                throw new Exception("ExportFile content mismatch");
+
+            string outDir = Path.Combine(dir, $"out-{fs}");
+            f.ExportDirectory("\\backup", outDir);
+            if (!File.ReadAllBytes(Path.Combine(outDir, "readme.md")).SequenceEqual("readme"u8.ToArray())) throw new Exception("export readme mismatch");
+            if (!File.ReadAllBytes(Path.Combine(outDir, "data", "sub", "a.bin")).SequenceEqual(big)) throw new Exception("export a.bin mismatch");
+            if (Encoding.UTF8.GetString(File.ReadAllBytes(Path.Combine(outDir, "data", "sub", "\u6d4b\u8bd5\u6587\u4ef6.txt"))) != "unicode") throw new Exception("export unicode mismatch");
+            if (!Directory.Exists(Path.Combine(outDir, "empty-dir"))) throw new Exception("export kept the empty directory");
+
+            var listed = f.ListDirectory("\\backup\\data\\sub").Select(e => e.Name).OrderBy(n => n).ToList();
+            if (!listed.Contains("a.bin") || !listed.Contains("\u6d4b\u8bd5\u6587\u4ef6.txt")) throw new Exception("volume listing after import incomplete");
+        }
+        Console.WriteLine($"       {fs}: import/export round-trip byte-identical (incl. unicode, empty dir)");
+    }
+});
+
 // ------------------------------------------------------------------- summary
 Console.WriteLine();
 if (failures.Count == 0)
