@@ -76,6 +76,41 @@ public static class VolumeFilesystemExtensions
         ExportDirectoryRecursive(fs, volumePath, localDir);
     }
 
+    // ------------------------------------------------------------------ async
+
+    // The same pattern as Volume.CreateAsync / OpenAsync: the work runs on a
+    // thread-pool thread so UI callers stay responsive. The native exFAT
+    // calls and the sector I/O are not cancellable mid-flight - the tokens
+    // only prevent an operation that has not started yet.
+
+    /// <summary><see cref="IVolumeFileSystem.ReadFile"/> as a thread-pool task.</summary>
+    public static Task<byte[]> ReadFileAsync(this IVolumeFileSystem fs, string path, CancellationToken cancellationToken = default)
+        => Task.Run(() => fs.ReadFile(path), cancellationToken);
+
+    /// <summary><see cref="IVolumeFileSystem.WriteFile"/> as a thread-pool task (byte array form; spans cannot cross task boundaries).</summary>
+    public static Task WriteFileAsync(this IVolumeFileSystem fs, string path, byte[] data, CancellationToken cancellationToken = default)
+        => Task.Run(() => fs.WriteFile(path, data), cancellationToken);
+
+    /// <summary><see cref="IVolumeFileSystem.ListDirectory"/> as a thread-pool task.</summary>
+    public static Task<IReadOnlyList<FatEntry>> ListDirectoryAsync(this IVolumeFileSystem fs, string path, CancellationToken cancellationToken = default)
+        => Task.Run(() => fs.ListDirectory(path), cancellationToken);
+
+    /// <summary><see cref="ImportFile"/> as a thread-pool task.</summary>
+    public static Task ImportFileAsync(this IVolumeFileSystem fs, string localPath, string? volumePath = null, CancellationToken cancellationToken = default)
+        => Task.Run(() => fs.ImportFile(localPath, volumePath), cancellationToken);
+
+    /// <summary><see cref="ExportFile"/> as a thread-pool task.</summary>
+    public static Task ExportFileAsync(this IVolumeFileSystem fs, string volumePath, string localPath, CancellationToken cancellationToken = default)
+        => Task.Run(() => fs.ExportFile(volumePath, localPath), cancellationToken);
+
+    /// <summary><see cref="ImportDirectory"/> as a thread-pool task.</summary>
+    public static Task ImportDirectoryAsync(this IVolumeFileSystem fs, string localDir, string volumePath = "\\", CancellationToken cancellationToken = default)
+        => Task.Run(() => fs.ImportDirectory(localDir, volumePath), cancellationToken);
+
+    /// <summary><see cref="ExportDirectory"/> as a thread-pool task.</summary>
+    public static Task ExportDirectoryAsync(this IVolumeFileSystem fs, string volumePath, string localDir, CancellationToken cancellationToken = default)
+        => Task.Run(() => fs.ExportDirectory(volumePath, localDir), cancellationToken);
+
     // ------------------------------------------------------------------ core
 
     private static void ImportDirectoryRecursive(IVolumeFileSystem fs, string localDir, string volumePath)

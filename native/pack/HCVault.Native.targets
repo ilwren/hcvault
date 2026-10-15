@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!--
+    HCVault.Native: native library copy for builds WITHOUT a RuntimeIdentifier.
+
+    NuGet copies runtimes/{rid}/native assets into the output only when a RID
+    is known (dotnet build -r win-x64, a RuntimeIdentifier in the project, or
+    a publish with a default RID). A plain 'dotnet build' / F5 in the IDE has
+    no RID, so nothing was copied and the first volume operation failed with
+    DllNotFoundException.
+
+    This fallback copies the library matching the BUILD HOST into the output
+    directory - exactly right for local development and debugging. For
+    deployment, publishing or cross-building, set an explicit RuntimeIdentifier:
+    the regular runtimes/ machinery then selects the correct platform and this
+    target does nothing.
+  -->
+  <Target Name="HCVaultNativeCopyForRidlessBuild"
+          AfterTargets="Build"
+          Condition="'$(RuntimeIdentifier)' == '' and '$(RuntimeIdentifiers)' == '' and '$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <!-- NETCoreSdkRuntimeIdentifier: the RID of the machine running the
+           build (set by the .NET SDK; empty outside an SDK build) -->
+      <_HCVaultHostRid>$(NETCoreSdkRuntimeIdentifier)</_HCVaultHostRid>
+    </PropertyGroup>
+    <ItemGroup>
+      <!-- MSBuildThisFileDirectory points INSIDE this package
+           (buildTransitive/net8.0/), so this works for direct and
+           transitive references alike - no Pkg... property needed -->
+      <_HCVaultHostNative Include="$(MSBuildThisFileDirectory)../../runtimes/$(_HCVaultHostRid)/native/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_HCVaultHostNative)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_HCVaultHostNative)' != ''" />
+    <Message Text="HCVault.Native: no RuntimeIdentifier set - ensured the host runtime library ($(_HCVaultHostRid)) is in the output. Set a RuntimeIdentifier for deployment builds."
+             Condition="'@(_HCVaultHostNative)' != ''"
+             Importance="high" />
+    <Warning Text="HCVault.Native: no RuntimeIdentifier set and no native library for the host runtime '$(_HCVaultHostRid)' is in this package. Build with -r &lt;rid&gt; (e.g. win-x64, linux-x64, osx-arm64) or build the core from source for this platform."
+             Condition="'@(_HCVaultHostNative)' == '' and Exists('$(MSBuildThisFileDirectory)../../runtimes/win-x64')"
+             Importance="high" />
+  </Target>
+
+</Project>

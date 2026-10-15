@@ -18,7 +18,7 @@
       Windows, Linux and Android) automatically; build your own from the
       repository sources with CMake if you need another platform.
     </description>
-    <releaseNotes>1.6.0: keyfile streams (keyfile contents as byte/Stream sources instead of file paths), folder import/export helpers, path forms without a leading separator, and an automatic dependency on the matching HCVault.Native package.</releaseNotes>
+    <releaseNotes>1.6.1: async filesystem operations (ReadFileAsync, WriteFileAsync, ListDirectoryAsync, ImportFileAsync, ExportFileAsync, ImportDirectoryAsync, ExportDirectoryAsync), and the HCVault.Native dependency now also copies the native library into RID-less (default debug) build outputs.</releaseNotes>
     <copyright>Copyright VeraCrypt contributors; TrueCrypt Foundation; 2026 packaging</copyright>
     <tags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2</tags>
     <repository type="git" url="$repositoryUrl$" />

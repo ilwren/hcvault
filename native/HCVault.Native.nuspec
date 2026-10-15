@@ -20,7 +20,7 @@
       (x64) and Android (arm64-v8a/armeabi-v7a/x86/x86_64). Build from the
       repository sources with CMake if you need another platform.
     </description>
-    <releaseNotes>1.6.0: the exFAT bridge accepts an empty path as the volume root; otherwise no native changes - version-aligned with HCVault.Core 1.6.0 (keyfile streams, folder import/export, automatic HCVault.Native dependency). Volumes are compatible with 1.4.x/1.5.x (same vcapi v4).</releaseNotes>
+    <releaseNotes>1.6.1: packaging only - ships a build-translation targets file that copies the native library into the output of RID-less (default debug) builds, so a plain dotnet build or IDE F5 works out of the box. No library changes; the binaries are identical to 1.6.0 and volumes are compatible with 1.4.x/1.5.x/1.6.0 (same vcapi v4).</releaseNotes>
     <copyright>Copyright VeraCrypt contributors; TrueCrypt Foundation; 2026 packaging</copyright>
     <tags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2;native</tags>
     <repository type="git" url="$repositoryUrl$" />
@@ -28,6 +28,8 @@
   <files>
     <!-- build integration + docs + license -->
     <file src="pack/nuget-icon.png" target="" />
+    <!-- copies the native library for RID-less (default debug) builds -->
+    <file src="pack/HCVault.Native.targets" target="buildTransitive/net8.0" />
     <file src="src/veracrypt/LICENSE-VeraCrypt.txt" target="" />
     <file src="src/fatfs/LICENSE-FatFs.txt" target="" />
     <file src="PACKAGE-README.md" target="" />

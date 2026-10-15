@@ -22,9 +22,11 @@ matching library is pulled in automatically, copied to your output (or
 packaged into the APK `lib/<abi>/` on Android) and found by the wrapper's
 loader. Reference this package explicitly only to force a different version.
 
-Building without a `RuntimeIdentifier` copies no native library; either set
-one (`-r linux-x64` …), place the library next to the application manually,
-or point the `VCNATIVE_HOME` environment variable at it.
+Building without a `RuntimeIdentifier` (the default F5/debug build) copies
+the library matching the machine you build on into the output automatically
+- convenient for development. For deployment, publishing or cross-building,
+set an explicit RuntimeIdentifier (`-r linux-x64` …) so the correct
+platform's library is selected.
 
 Need a platform not listed above (macOS, other architectures)? Build the core
 from the repository sources instead: it is a plain CMake project

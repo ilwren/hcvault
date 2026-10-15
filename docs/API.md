@@ -31,7 +31,9 @@ different version.
 Build your application with a `RuntimeIdentifier` (`-r linux-x64`,
 `-r win-x64`, …) and the matching `hcvault-core` binary is copied to the
 output automatically. On Android it is packaged into the APK at
-`lib/<abi>/`.
+`lib/<abi>/`. A plain build **without** a RuntimeIdentifier (the default
+when you hit F5) copies the library for the machine you are building on —
+fine for debugging; set a RuntimeIdentifier for deployment builds.
 
 The wrapper locates the native library at runtime, in this order:
 
@@ -311,6 +313,13 @@ fs.ExportDirectory("\\Documents", @"D:\restore\Documents");
 ```
 
 Files are transferred whole (one file fully in memory at a time).
+
+Every read, write and transfer above has an `...Async` counterpart
+(`ReadFileAsync`, `WriteFileAsync`, `ListDirectoryAsync`,
+`ImportFileAsync`, `ExportFileAsync`, `ImportDirectoryAsync`,
+`ExportDirectoryAsync`) running the operation on a thread-pool thread, with
+the same semantics as `Volume.CreateAsync`: the cancellation token only
+prevents an operation that has not started yet.
 
 ### Sizing a container
 

@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/) and the project
 follows semantic versioning.
 
+## 1.6.1 — 2026-10-15
+
+- **Fixed: RID-less debug builds were missing the native library.** NuGet
+  copies `runtimes/{rid}/native` assets only when a RuntimeIdentifier is
+  known (and not even reliably then), so a plain `dotnet build` or IDE F5
+  could produce an output containing only HCVault.Core.dll - the first
+  volume operation then failed with `DllNotFoundException`. The
+  HCVault.Native package now ships a build-translation targets file that
+  copies the library matching the build host into the output when no RID
+  is set, with a visible build note. Deployment builds should still set a
+  RuntimeIdentifier so the correct platform is selected.
+
+- **New: async filesystem operations.** `ReadFileAsync`, `WriteFileAsync`,
+  `ListDirectoryAsync`, `ImportFileAsync`, `ExportFileAsync`,
+  `ImportDirectoryAsync` and `ExportDirectoryAsync` run the filesystem
+  layer on thread-pool threads - same semantics as `Volume.CreateAsync`:
+  the cancellation tokens only prevent operations that have not started
+  yet.
+
+- The release workflow's version-consistency check now names the two
+  project files a version mismatch lives in.
+
 ## 1.6.0 — 2026-10-14
 
 - **New: keyfile streams.** `KeyFileStreams` on `VolumeCreationOptions`,
@@ -18,12 +40,23 @@ follows semantic versioning.
 - **New: folder import / export.** `ImportFile`, `ExportFile`,
   `ImportDirectory` and `ExportDirectory` on the filesystem layer move
   single files or whole directory trees between the host and a volume,
-  preserving names, Unicode and empty directories.
+  preserving names, Unicode and empty directories. Every filesystem read,
+  write and transfer also has an `...Async` counterpart
+  (`ReadFileAsync`, `ImportDirectoryAsync`, …) running on a thread-pool
+  thread, like `Volume.CreateAsync`.
 
 - **Simpler paths.** Volume paths no longer require a leading separator:
   `"file.txt"`, `"docs/note.txt"` and the classic `"\\file.txt"` forms
   all work, on both FAT and exFAT (the exFAT bridge now also accepts an
   empty path as the volume root).
+
+- **Packaging: RID-less debug builds get the native library.** NuGet copies
+  `runtimes/{rid}/native` assets only when a RuntimeIdentifier is known, so
+  a plain `dotnet build` / IDE F5 produced no `hcvault-core` binary and the
+  first volume operation failed with `DllNotFoundException`. The
+  HCVault.Native package now ships a build-translation targets file that
+  copies the library matching the build host into the output when no RID is
+  set (with a visible note; deployment builds should still set a RID).
 
 - **Packaging: HCVault.Core now depends on the exact matching HCVault.Native
   version.** Installing `HCVault.Core` pulls the prebuilt native libraries

@@ -27,7 +27,9 @@ dotnet add package HCVault.Core     # 托管封装（net8.0 + net10.0）
 
 构建应用时带 `RuntimeIdentifier`（`-r linux-x64`、`-r win-x64` …），
 对应的 `hcvault-core` 二进制会自动复制到输出目录；Android 上打包进
-APK 的 `lib/<abi>/`。
+APK 的 `lib/<abi>/`。**不带** RuntimeIdentifier 的普通构建（按 F5 调试
+即是）会复制与本机构架一致的库——调试够用；部署构建请显式设置
+RuntimeIdentifier。
 
 封装层按以下顺序在运行时定位原生库：
 
@@ -295,6 +297,12 @@ fs.ExportDirectory("\\Documents", @"D:\restore\Documents");
 ```
 
 文件按整体传输（同一时刻一个文件完整在内存中）。
+
+上面的每个读、写、传输方法都有 `...Async` 版本（`ReadFileAsync`、
+`WriteFileAsync`、`ListDirectoryAsync`、`ImportFileAsync`、
+`ExportFileAsync`、`ImportDirectoryAsync`、`ExportDirectoryAsync`），
+在线程池线程上执行；语义与 `Volume.CreateAsync` 相同：取消令牌只能
+阻止尚未开始的操作。
 
 ### 计算容器大小
 

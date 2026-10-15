@@ -662,6 +662,36 @@ Check("import/export: directory round-trip (FAT + exFAT)", () =>
     }
 });
 
+Check("async: filesystem operations as tasks", () =>
+{
+    string local = Path.Combine(dir, "asyncfile.bin");
+    File.WriteAllBytes(local, RandomBytes(64 * 1024));
+
+    string p = Path.Combine(dir, "asyncfs.hc");
+    using (var pw = SecurePassword.FromText("async-fs"))
+        Volume.Create(new VolumeCreationOptions
+            { Path = p, SizeBytes = 2L * 1024 * 1024, Password = pw,
+              Kdf = VcKdf.HmacSha512, Quick = true });
+
+    using (var pw = SecurePassword.FromText("async-fs"))
+    using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw }))
+    using (var f = VolumeFilesystem.Mount(vol))
+    {
+        f.WriteFileAsync("blob.bin", File.ReadAllBytes(local)).GetAwaiter().GetResult();
+        byte[] back = f.ReadFileAsync("blob.bin").GetAwaiter().GetResult();
+        if (back.Length != 64 * 1024) throw new Exception("async write/read size mismatch");
+
+        f.ImportFileAsync(local, "again.bin").GetAwaiter().GetResult();
+        var names = f.ListDirectoryAsync("").GetAwaiter().GetResult().Select(e => e.Name).OrderBy(n => n).ToList();
+        if (!names.SequenceEqual(new[] { "again.bin", "blob.bin" })) throw new Exception($"async listing wrong: {string.Join(",", names)}");
+
+        f.ExportFileAsync("again.bin", Path.Combine(dir, "async-out.bin")).GetAwaiter().GetResult();
+        if (!File.ReadAllBytes(Path.Combine(dir, "async-out.bin")).SequenceEqual(File.ReadAllBytes(local)))
+            throw new Exception("async export content mismatch");
+    }
+    Console.WriteLine("       async write/read/list/import/export round-trip OK");
+});
+
 // ------------------------------------------------------------------- summary
 Console.WriteLine();
 if (failures.Count == 0)
