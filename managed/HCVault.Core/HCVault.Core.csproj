@@ -19,7 +19,7 @@
          project itself stays dependency-free and builds offline.
          Pack (CI/scripts pass the real repository URL):
            dotnet pack -c Release -p:ProjectUrl=... -p:RepositoryUrl=... -->
-    <Version>1.6.0</Version>
+    <Version>1.6.1</Version>
     <NuspecFile>HCVault.Core.nuspec</NuspecFile>
     <NuspecProperties>version=$(Version);projectUrl=$(ProjectUrl);repositoryUrl=$(RepositoryUrl);configuration=$(Configuration)</NuspecProperties>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
