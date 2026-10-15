@@ -128,16 +128,19 @@ catch (VcWrongPasswordException) { /* 重新询问 / 放弃 */ }
 `Flushing` → `Finished`（或 `Error`）。`CreationProgress` 提供
 `BytesDone`、`BytesTotal`、`Stage` 和算好的 `Fraction`。
 
-文件系统限制：内置 FAT 格式化器大约需要 ≥ 1 MiB；exFAT 需要 ≥ 4 MiB。
-更小的卷请用 `Filesystem.None` + `Volume.OpenStream`，或自行格式化
-数据区。
+文件系统限制（精确值，原生调用前即以明确报错拦截）：扣除 256 KiB 卷头
+后，FAT 需要至少 36,864 字节数据区（容器 ≥ 299,008 B）且上限 2 TiB 数
+据区；exFAT 需要 2 MiB（容器 ≥ 2,359,296 B）；`Filesystem.None` 只要
+262,145 B 以上。隐藏卷（布局不同）200 KiB 起。
 
 **密钥流。** `KeyFileStreams` 非空时，密钥混合在本库内完成而非原生
 核心：每个流只读前 1 MiB（流本身不会被释放）；`KeyFiles` 里的路径先
 按普通文件读入，然后才是各流，按列表顺序。结果与原生密钥路径**逐字
 节一致**（测试套件双向验证过），两种形式创建的卷可互换打开。与纯路
 径模式不同：此模式不展开目录——每个来源必须是文件或流；每个来源至
-少要有 1 字节。
+少要有 1 字节。每个来源都从头读起（可查找的流会自动回到开头，因此同
+一批实例可以在之后的打开中复用），且流必须保持存活（未被释放）直到
+调用返回；`new MemoryStream(bytes)` 是最简单的来源。
 
 `Volume.CreateAsync(options, cancellationToken)` 把同样的创建放到线程池
 线程上执行，供 `await` 调用方使用。取消令牌只能阻止尚未开始的创建——

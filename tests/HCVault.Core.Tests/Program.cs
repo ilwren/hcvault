@@ -496,6 +496,45 @@ Check("async: create / open / change password as tasks", () =>
     Console.WriteLine("       password rotated via task; reopened with new credentials");
 });
 
+Check("volume size limits: exact per-filesystem minimums, clear errors", () =>
+{
+    void ExpectArgError(VcFilesystem fs, long size)
+    {
+        string p = Path.Combine(dir, $"toosmall-{fs}-{size}.hc");
+        try
+        {
+            using var pw = SecurePassword.FromText("x");
+            Volume.Create(new VolumeCreationOptions
+                { Path = p, SizeBytes = size, Password = pw, Filesystem = fs,
+                  Kdf = VcKdf.HmacSha512, Quick = true });
+            throw new Exception($"{fs} volume of {size} B was accepted");
+        }
+        catch (VcArgumentException ex) when (!ex.Message.Contains("VolumeCreator"))
+        {
+            Console.WriteLine($"       {fs} {size} B rejected: {ex.Message.Split('.')[0]}.");
+        }
+    }
+    void ExpectOk(VcFilesystem fs, long size)
+    {
+        string p = Path.Combine(dir, $"minok-{fs}-{size}.hc");
+        using (var pw = SecurePassword.FromText("x"))
+            Volume.Create(new VolumeCreationOptions
+                { Path = p, SizeBytes = size, Password = pw, Filesystem = fs,
+                  Kdf = VcKdf.HmacSha512, Quick = true });
+        using (var pw = SecurePassword.FromText("x"))
+        using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw }))
+            Console.WriteLine($"       {fs} {size} B OK (data area {vol.DataSize} B)");
+        File.Delete(p);
+    }
+
+    ExpectArgError(VcFilesystem.None, 262_144);
+    ExpectOk(VcFilesystem.None, 262_145);
+    ExpectArgError(VcFilesystem.Fat, 299_007);      // used to die in the native core (CreationThread:74)
+    ExpectOk(VcFilesystem.Fat, 299_008);
+    ExpectArgError(VcFilesystem.ExFat, 2L * 1024 * 1024 + 256 * 1024 - 1);
+    ExpectOk(VcFilesystem.ExFat, 2L * 1024 * 1024 + 256 * 1024);
+});
+
 // ------------------------------------------------------- keyfile streams
 Check("keyfiles: stream sources mix exactly like native keyfile paths", () =>
 {
@@ -580,6 +619,32 @@ Check("keyfiles: stream sources mix exactly like native keyfile paths", () =>
     using (var pw = SecurePassword.FromText("plain-new"))
     using (var vol = Volume.Open(new VolumeOpenOptions { Path = p, Password = pw }))
         Console.WriteLine("       rotated from stream keyfiles to a plain password");
+
+    // the same stream instances back a second operation (seekable streams
+    // are rewound to the start automatically)
+    var shared = sources();
+    using (var pw = SecurePassword.FromText("hunter2"))
+        Volume.Create(new VolumeCreationOptions
+            { Path = p, SizeBytes = 2L * 1024 * 1024, Password = pw,
+              KeyFileStreams = shared, Kdf = fastKdf, Quick = true });
+    using (var pw = SecurePassword.FromText("hunter2"))
+    using (var vol = Volume.Open(new VolumeOpenOptions
+            { Path = p, Password = pw, KeyFileStreams = shared }))
+        Console.WriteLine("       reused the same stream instances for create and open");
+
+    // a disposed stream fails with an actionable message
+    using (var pw = SecurePassword.FromText("hunter2"))
+    {
+        var dead = new MemoryStream(File.ReadAllBytes(kf1));
+        dead.Dispose();
+        try
+        {
+            using var vol = Volume.Open(new VolumeOpenOptions
+                { Path = p, Password = pw, KeyFileStreams = new List<Stream> { dead } });
+            throw new Exception("a disposed keyfile stream was accepted");
+        }
+        catch (VcArgumentException) { Console.WriteLine("       disposed keyfile stream rejected"); }
+    }
 });
 
 // ---------------------------------------------------------- path handling

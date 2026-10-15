@@ -19,6 +19,20 @@ follows semantic versioning.
   native binaries at their exact paths, no doubled prefixes. 1.6.2 is the
   first release whose packages actually work when installed.
 
+- **Clear size validation on volume creation.** Sizes the native core
+  cannot handle used to surface as a bare source position
+  (`VeraCrypt::VolumeCreator::CreationThread:74`). The managed layer now
+  rejects them up front with the exact limits: FAT containers >= 299,008
+  bytes (and <= 2 TiB data area), exFAT >= 2,359,296, `Filesystem.None`
+  >= 262,145; hidden volumes keep their 200 KiB floor. All boundaries are
+  covered by tests at the exact byte.
+
+- **Hardened: keyfile streams.** Seekable sources are rewound to the
+  start on every use, so the same stream instances can back both the
+  creation and a later open. A stream that was disposed before the call
+  now fails with an actionable message (a bare `MemoryStream(byte[])`
+  is always readable - "not readable" always means disposed/closed).
+
 ## 1.6.1 — 2026-10-15
 
 - **Fixed: RID-less debug builds were missing the native library.** NuGet

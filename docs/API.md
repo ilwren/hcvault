@@ -134,9 +134,11 @@ Progress stages (`VcCreationStage`): `WritingData` → `WritingBackupHeader`
 → `Flushing` → `Finished` (or `Error`). `CreationProgress` exposes
 `BytesDone`, `BytesTotal`, `Stage` and the computed `Fraction`.
 
-Filesystem limits: the built-in FAT formatter needs roughly ≥ 1 MiB; exFAT
-needs ≥ 4 MiB. Below that, create with `Filesystem.None` and use
-`Volume.OpenStream` — or format the data area yourself.
+Filesystem limits (exact, enforced with a clear error before the native
+call): after 256 KiB of volume headers, FAT needs a 36,864-byte data area
+(container ≥ 299,008 B) and is limited to a 2 TiB data area; exFAT needs
+2 MiB (container ≥ 2,359,296 B); `Filesystem.None` accepts anything above
+262,145 B. Hidden volumes (different layout) work from 200 KiB.
 
 **Keyfile streams.** When `KeyFileStreams` is non-empty, the keyfile mixing
 happens in this library instead of the native core: each stream is read (not
@@ -145,7 +147,11 @@ as regular files first, then the streams, in list order. The result is
 byte-identical to native keyfile paths (the test suite verifies both
 directions), so volumes created either way open with either form. Unlike the
 path-only mode, directory entries are not expanded — every source must be a
-file or stream. At least one byte per source is required.
+file or stream. At least one byte per source is required. Every source is
+read from its start (seekable streams are rewound automatically, so the
+same instances can back a later open), and the streams must stay alive —
+not disposed — until the call returns; `new MemoryStream(bytes)` is the
+simplest source.
 
 `Volume.CreateAsync(options, cancellationToken)` runs the same creation on
 a thread-pool thread for `await`-based callers. The token only prevents a

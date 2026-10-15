@@ -89,7 +89,16 @@ internal static class KeyfileMixer
     private static void ApplyStream(Stream stream, byte[] pool)
     {
         if (!stream.CanRead)
-            throw new VcArgumentException("A keyfile stream is not readable.");
+            throw new VcArgumentException(
+                "A keyfile stream is not readable - it was disposed or closed before the " +
+                "call. Build it directly from the bytes (new MemoryStream(bytes)) and keep " +
+                "it alive until the volume operation has returned.");
+
+        // Keyfile semantics: every application reads the source from the
+        // start. A seekable stream positioned elsewhere (e.g. reused after a
+        // previous create/open) is rewound automatically.
+        if (stream.CanSeek && stream.Position != 0)
+            stream.Position = 0;
 
         long total = 0;
         uint crc = 0xFFFF_FFFF;      // Crc32 register, never final-XORed

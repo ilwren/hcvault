@@ -69,7 +69,8 @@ What differs is everything around the container:
 
 It can:
 
-- create normal and hidden file-hosted volumes (200 KiB minimum), with any
+- create normal and hidden file-hosted volumes (normal: 257 KiB raw /
+  292 KiB FAT / 2.25 MiB exFAT minimum; hidden: 200 KiB), with any
   cipher / KDF / keyfile / PIM combination
 - open volumes from current and legacy (V1 layout) VeraCrypt releases,
   including reading through the embedded backup header when the primary one

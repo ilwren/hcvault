@@ -73,11 +73,37 @@ public sealed partial class Volume
 
         HCVaultLibrary.Initialize();
 
-        if (options.SizeBytes < 200 * 1024)
-            throw new VcArgumentException("Volume size must be at least 200 KiB.");
+        // Size validation with the exact native minimums, so a bad size
+        // fails here with a readable message instead of deep inside the
+        // VeraCrypt core (which reports only a source position).
+        if (options.Hidden)
+        {
+            if (options.SizeBytes < 200 * 1024)
+                throw new VcArgumentException("Hidden volume size must be at least 200 KiB.");
+        }
+        else
+        {
+            const long headerBytes = 2 * 128 * 1024;   // V2 layout: header + backup header region
+            long minData = options.Filesystem switch
+            {
+                VcFilesystem.None => 1,                          // raw: any data area
+                VcFilesystem.Fat => 36_864,                      // TC_MIN_FAT_FS_SIZE (9 x 4096)
+                VcFilesystem.ExFat => 2L * 1024 * 1024,          // f_mkfs: 4096 sectors
+                _ => throw new VcArgumentException($"Unknown filesystem {options.Filesystem}"),
+            };
+            long minSize = headerBytes + minData;
+            if (options.SizeBytes < minSize)
+                throw new VcArgumentException(
+                    $"{options.Filesystem} volumes need at least {minSize} bytes " +
+                    $"({minData:N0} data area + {headerBytes:N0} of volume headers); got {options.SizeBytes}. " +
+                    $"Use Filesystem.None for smaller volumes, or increase SizeBytes.");
 
-        if (options.Hidden && options.SizeBytes < 200 * 1024)
-            throw new VcArgumentException("Hidden volume size must be at least 200 KiB.");
+            // the FAT formatter is limited to 0x100000000 sectors of 512 bytes
+            if (options.Filesystem == VcFilesystem.Fat
+                && options.SizeBytes > headerBytes + 2_199_023_255_552L)
+                throw new VcArgumentException(
+                    "FAT volumes cannot exceed a 2 TiB data area; use ExFat or Filesystem.None.");
+        }
 
         var keyfiles = options.KeyFiles.ToArray();
         SecurePassword? mixed = null;
