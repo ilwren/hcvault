@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/) and the project
 follows semantic versioning.
 
+## 1.6.2 — 2026-10-15
+
+- **Fixed: the native package layout was broken in every published
+  version.** The nuspec mapped the prebuilt libraries to
+  `runtimes/runtimes/{rid}/native/` (a doubled prefix - MSBuild joins
+  wildcard matches and the target directory differently on the Windows
+  build agent than locally), so NuGet never copied them into consuming
+  builds: referencing HCVault.Native never actually delivered a loadable
+  library, with or without a RuntimeIdentifier, and the first volume
+  operation failed with `DllNotFoundException`. The libraries are now
+  listed explicitly (`runtimes/{rid}/native`, platform-independent), and
+  CI verifies the package contents before anything is released: all 8
+  native binaries at their exact paths, no doubled prefixes. 1.6.2 is the
+  first release whose packages actually work when installed.
+
 ## 1.6.1 — 2026-10-15
 
 - **Fixed: RID-less debug builds were missing the native library.** NuGet
@@ -25,6 +40,10 @@ follows semantic versioning.
 
 - The release workflow's version-consistency check now names the two
   project files a version mismatch lives in.
+
+  *Known issue (fixed in 1.6.2): the nupkgs attached to the v1.6.1 GitHub
+  Release were built with the broken package layout - do not install
+  them; use 1.6.2 or later.*
 
 ## 1.6.0 — 2026-10-14
 

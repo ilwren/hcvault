@@ -20,7 +20,7 @@
       (x64) and Android (arm64-v8a/armeabi-v7a/x86/x86_64). Build from the
       repository sources with CMake if you need another platform.
     </description>
-    <releaseNotes>1.6.1: packaging only - ships a build-translation targets file that copies the native library into the output of RID-less (default debug) builds, so a plain dotnet build or IDE F5 works out of the box. No library changes; the binaries are identical to 1.6.0 and volumes are compatible with 1.4.x/1.5.x/1.6.0 (same vcapi v4).</releaseNotes>
+    <releaseNotes>1.6.2: packaging fixes - the native libraries were nested under a doubled runtimes/ prefix in all earlier packages, so NuGet never copied them to consuming builds (referencing the package alone did not work); the layout is now the standard runtimes/{rid}/native. The package also ships a build-translation targets file that copies the native library into the output of RID-less (default debug) builds. No library changes; the binaries are identical to 1.6.0 and volumes are compatible with 1.4.x/1.5.x/1.6.0 (same vcapi v4).</releaseNotes>
     <copyright>Copyright VeraCrypt contributors; TrueCrypt Foundation; 2026 packaging</copyright>
     <tags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2;native</tags>
     <repository type="git" url="$repositoryUrl$" />
@@ -34,7 +34,21 @@
     <file src="src/fatfs/LICENSE-FatFs.txt" target="" />
     <file src="PACKAGE-README.md" target="" />
     <!-- the prebuilt native libraries (standard NuGet runtimes/ layout) -->
-    <file src="runtimes/**/*.dll" target="runtimes" />
-    <file src="runtimes/**/*.so" target="runtimes" />
+    <!-- the prebuilt native libraries (standard NuGet runtimes/ layout).
+         Listed explicitly instead of a wildcard: MSBuild pack joins
+         wildcard matches and target differently on Windows and Linux
+         (on Windows "runtimes/**/*.dll" + target="runtimes" produced a
+         doubled runtimes/runtimes/ prefix, so the libraries were never
+         copied to consuming builds - broken in every release before
+         1.6.2). Explicit entries are platform-independent; the CI
+         "Verify NuGet package contents" step asserts every path. -->
+    <file src="runtimes/win-x64/native/hcvault-core.dll" target="runtimes/win-x64/native" />
+    <file src="runtimes/win-x86/native/hcvault-core.dll" target="runtimes/win-x86/native" />
+    <file src="runtimes/win-arm64/native/hcvault-core.dll" target="runtimes/win-arm64/native" />
+    <file src="runtimes/linux-x64/native/libhcvault-core.so" target="runtimes/linux-x64/native" />
+    <file src="runtimes/android-arm64/native/libhcvault-core.so" target="runtimes/android-arm64/native" />
+    <file src="runtimes/android-arm/native/libhcvault-core.so" target="runtimes/android-arm/native" />
+    <file src="runtimes/android-x64/native/libhcvault-core.so" target="runtimes/android-x64/native" />
+    <file src="runtimes/android-x86/native/libhcvault-core.so" target="runtimes/android-x86/native" />
   </files>
 </package>

@@ -18,7 +18,7 @@
       Windows, Linux and Android) automatically; build your own from the
       repository sources with CMake if you need another platform.
     </description>
-    <releaseNotes>1.6.1: async filesystem operations (ReadFileAsync, WriteFileAsync, ListDirectoryAsync, ImportFileAsync, ExportFileAsync, ImportDirectoryAsync, ExportDirectoryAsync), and the HCVault.Native dependency now also copies the native library into RID-less (default debug) build outputs.</releaseNotes>
+    <releaseNotes>1.6.2: the HCVault.Native package layout is fixed - in all earlier versions the native libraries sat under a doubled runtimes/ prefix and were never copied to consuming builds (first volume operation failed with DllNotFoundException). Also: async filesystem operations (ReadFileAsync, WriteFileAsync, ListDirectoryAsync, ImportFileAsync, ExportFileAsync, ImportDirectoryAsync, ExportDirectoryAsync) and the native library is copied into RID-less (default debug) build outputs.</releaseNotes>
     <copyright>Copyright VeraCrypt contributors; TrueCrypt Foundation; 2026 packaging</copyright>
     <tags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2</tags>
     <repository type="git" url="$repositoryUrl$" />

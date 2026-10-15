@@ -9,7 +9,7 @@ name: build-demos
 #                          it. Nothing is published.
 #   manual run           - full release build, published as a GitHub Release:
 #     (Actions tab ->      Actions -> build-demos -> Run workflow -> enter
-#      "Run workflow")     the version tag, e.g. v1.6.1 (must match the
+#      "Run workflow")     the version tag, e.g. v1.6.2 (must match the
 #                          version in the project files).
 #
 # Release contents:
@@ -34,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version tag (e.g. v1.6.1) - must match the version in the project files'
+        description: 'Release version tag (e.g. v1.6.2) - must match the version in the project files'
         required: true
         type: string
 
@@ -437,6 +437,49 @@ jobs:
           dotnet pack native/HCVault.Native.pack.csproj -c Release "-p:ProjectUrl=$repoUrl" "-p:RepositoryUrl=${repoUrl}.git"
           dotnet pack managed/HCVault.Core -c Release "-p:ProjectUrl=$repoUrl" "-p:RepositoryUrl=${repoUrl}.git"
 
+      - name: Verify NuGet package contents
+        # guards against nuspec path-mapping regressions: every native binary
+        # must sit at exactly runtimes/{rid}/native (an earlier nuspec bug
+        # nested them under runtimes/runtimes/... and nothing was ever copied
+        # to consuming builds)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $expected = @(
+            'runtimes/win-x64/native/hcvault-core.dll',
+            'runtimes/win-x86/native/hcvault-core.dll',
+            'runtimes/win-arm64/native/hcvault-core.dll',
+            'runtimes/linux-x64/native/libhcvault-core.so',
+            'runtimes/android-arm64/native/libhcvault-core.so',
+            'runtimes/android-arm/native/libhcvault-core.so',
+            'runtimes/android-x64/native/libhcvault-core.so',
+            'runtimes/android-x86/native/libhcvault-core.so',
+            'buildTransitive/net8.0/HCVault.Native.targets'
+          )
+          $pkg = Get-ChildItem native/bin/Release/HCVault.Native.*.nupkg | Select-Object -First 1
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg.FullName)
+          try {
+            $entries = @($zip.Entries | ForEach-Object { $_.FullName })
+            foreach ($p in $expected) {
+              if ($entries -notcontains $p) { throw "$($pkg.Name) is missing '$p'" }
+            }
+            $doubled = @($entries | Where-Object { $_ -like 'runtimes/runtimes/*' })
+            if ($doubled.Count -gt 0) { throw "$($pkg.Name) has doubled runtimes/ paths: $($doubled -join ', ')" }
+            Write-Host "$($pkg.Name): layout OK ($($entries.Count) entries)"
+          }
+          finally { $zip.Dispose() }
+
+          $core = Get-ChildItem managed/HCVault.Core/bin/Release/HCVault.Core.*.nupkg | Select-Object -First 1
+          $zip2 = [System.IO.Compression.ZipFile]::OpenRead($core.FullName)
+          try {
+            $entries2 = @($zip2.Entries | ForEach-Object { $_.FullName })
+            foreach ($p in @('lib/net8.0/HCVault.Core.dll', 'lib/net10.0/HCVault.Core.dll')) {
+              if ($entries2 -notcontains $p) { throw "$($core.Name) is missing '$p'" }
+            }
+            Write-Host "$($core.Name): layout OK ($($entries2.Count) entries)"
+          }
+          finally { $zip2.Dispose() }
+
       - uses: actions/upload-artifact@v4
         with:
           name: nuget-package
@@ -520,12 +563,12 @@ jobs:
           set -e
           tag="$RELEASE_TAG"
 
-          # sanity: well-formed tag, e.g. v1.6.1 or v1.6.1-beta.1
+          # sanity: well-formed tag, e.g. v1.6.2 or v1.6.2-beta.1
           printf '%s' "$tag" | grep -Eq '^v[0-9]+(\.[0-9]+)*(-[A-Za-z0-9.]+)?$' \
-              || { echo "invalid tag '$tag' (expected e.g. v1.6.1)"; exit 1; }
+              || { echo "invalid tag '$tag' (expected e.g. v1.6.2)"; exit 1; }
 
           # the tag must match the version the packages were built from -
-          # a v1.7.0 release containing 1.6.1 packages would be confusing
+          # a v1.7.0 release containing 1.6.2 packages would be confusing
           core_pkg=$(find artifacts/nuget-package -name 'HCVault.Core.*.nupkg' | head -n1)
           native_pkg=$(find artifacts/nuget-package -name 'HCVault.Native.*.nupkg' | head -n1)
           core_ver=$(basename "$core_pkg" .nupkg); core_ver=${core_ver#HCVault.Core.}
