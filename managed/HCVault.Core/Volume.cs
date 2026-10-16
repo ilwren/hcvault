@@ -29,6 +29,17 @@ public sealed class VolumeOpenOptions
 
     /// <summary>Try the embedded backup header first (damaged primary header).</summary>
     public bool UseBackupHeader { get; init; }
+
+    /// <summary>
+    ///   The KDF the volume was created with. null (default) tries every
+    ///   supported KDF - compatible with any volume, but a failed attempt
+    ///   pays the full search (including a complete Argon2 pass per layout).
+    ///   Specifying the KDF opens with exactly that one: correct values open
+    ///   as before, wrong credentials fail after a single derivation - a
+    ///   fraction of the time and memory. There is no downside to setting it
+    ///   when the value is known.
+    /// </summary>
+    public VcKdf? Kdf { get; init; }
 }
 
 /// <summary>
@@ -83,7 +94,8 @@ public sealed partial class Volume : IDisposable
                 keyfiles, (nuint)keyfiles.Length,
                 options.Pim,
                 options.ReadOnly ? 1 : 0,
-                options.UseBackupHeader ? 1 : 0);
+                options.UseBackupHeader ? 1 : 0,
+                options.Kdf?.ToNative());
 
             if (handle == IntPtr.Zero)
                 throw Status.ToException(NativeMethods.vc_last_status());

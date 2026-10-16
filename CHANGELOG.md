@@ -4,6 +4,57 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/) and the project
 follows semantic versioning.
 
+## 1.6.3 — 2026-10-16
+
+- **New: streaming file access.** `IVolumeFileSystem.OpenFile(path,
+  VcFileMode.Read | Create | Append)` returns a `Stream` over a file inside
+  the volume - random-position reads, in-place writes, zero-filled holes and
+  appends in constant memory, so a multi-gigabyte file no longer has to be
+  loaded whole. exFAT streams are backed by new vcapi v6 functions
+  (`vc_exfat_tell` / `vc_exfat_size` / `vc_exfat_flush`); the FAT driver
+  implements its own cluster-chain stream (growth updates the directory
+  entry immediately). The Python wrapper keeps the whole-file API for now.
+
+- **New: in-place exFAT re-format.** `VolumeFilesystem.FormatExFat(volume)`
+  formats an open volume's data area as exFAT (contents destroyed) - a FAT
+  volume converts without recreating the container, and a `Filesystem.None`
+  volume gains a filesystem.
+
+- **New: open with an explicit KDF.** `VolumeOpenOptions.Kdf` (and the
+  `kdf=` argument of the Python `Volume.open`, plus a `kdf_name`
+  parameter on the C `vc_open_volume` - vcapi v5) tells the core which
+  KDF the volume was created with. The default stays auto-detection
+  (every supported KDF is tried, which is what a failed attempt pays for,
+  including a full Argon2 pass per volume layout); with the KDF given,
+  wrong credentials fail after a single derivation. No downside when the
+  value is known.
+
+- **Fixed: exFAT operations were not safe across concurrently used
+  volumes.** FatFs resolves any path without a drive prefix against a
+  process-global "current drive" that the most recent mount sets, and
+  the exFAT bridge passed bare paths. With two exFAT volumes mounted at
+  the same time - or one being formatted while another was in use - file
+  operations could land on the wrong volume, fail with
+  `not enabled (fr=12)`, or hit spurious short writes. Every FatFs call
+  is now pinned to its own mount's drive slot and serialized behind a
+  single lock, so independent volumes no longer interfere. The managed
+  test suite now runs its independent scenarios in parallel as a
+  regression guard (`HCV_TEST_SERIAL=1` restores the serial order when
+  debugging).
+
+- **Fixed: `ContainerSize.GetRequiredContainerSize` could return
+  uncreatable FAT sizes.** Its internal FAT floor was 64 data sectors
+  (a 294,912-byte container), but the native FAT formatter requires 72
+  (36,864 bytes, TC_MIN_FAT_FS_SIZE) - so for small files it answered
+  294,912 and `Volume.Create` then rejected that very size. The floors
+  are now the exact native minimums (FAT 299,008 / exFAT 2,359,296 /
+  None 262,145), and a regression test creates and fills a volume at
+  every returned minimum.
+
+- **Build scripts: safer offline behavior.** `build.ps1` / `build.sh` accept `-SkipTests` / `HCV_SKIP_TESTS` to build everything except the
+  managed test suite, probe the git origin safely for the repository URL (falling back to the project's home URL outside a checkout), and
+  fail with an actionable message instead of a PowerShell error when git is absent or the tree is not a checkout.
+
 ## 1.6.2 — 2026-10-15
 
 - **Fixed: the native package layout was broken in every published

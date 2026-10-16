@@ -33,8 +33,11 @@ public static class ContainerSize
     /// <summary>f_mkfs refuses exFAT volumes with fewer than 16 clusters.</summary>
     private const long ExfatMinClusters = 16;
 
-    /// <summary>Smallest FAT data area this model considers formattable.</summary>
-    private const long FatMinDataSectors = 64;
+    /// <summary>
+    ///   Smallest FAT data area the native formatter accepts:
+    ///   TC_MIN_FAT_FS_SIZE = 36,864 bytes = 72 sectors of 512.
+    /// </summary>
+    private const long FatMinDataSectors = 72;
 
     /// <summary>
     ///   The largest file (in bytes) that fits into a freshly formatted volume
@@ -63,8 +66,9 @@ public static class ContainerSize
     /// <summary>
     ///   The smallest container size (multiple of 512) whose freshly formatted
     ///   volume can hold a single file of <paramref name="fileSizeBytes" />.
-    ///   The returned volume passes <c>Volume.Create</c> size validation
-    ///   (at least 200 KiB).
+    ///   The returned size always passes <c>Volume.Create</c>'s validation:
+    ///   never below the native formatter minimums (FAT 299,008 bytes,
+    ///   exFAT 2,359,296, None 262,145).
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">negative size or unknown filesystem</exception>
     public static long GetRequiredContainerSize(long fileSizeBytes, VcFilesystem filesystem)
@@ -75,12 +79,14 @@ public static class ContainerSize
             throw new ArgumentOutOfRangeException(nameof(filesystem), filesystem, null);
 
         if (filesystem == VcFilesystem.None)
-            return RoundUpToSector(fileSizeBytes + HeaderOverhead);
+            return Math.Max(HeaderOverhead + 1,   // Volume.Create floor: 1 byte of data area
+                RoundUpToSector(fileSizeBytes + HeaderOverhead));
 
         // the smallest volume the formatter accepts at all
         long minData = filesystem == VcFilesystem.ExFat ? ExfatMinDataSectors : FatMinDataSectors;
+        // with the exact per-filesystem minimums this is always above
+        // Volume.Create's floor for that filesystem
         long lo = RoundUpToSector(HeaderOverhead + minData * SectorSize);
-        lo = Math.Max(lo, 200 * 1024);   // Volume.Create's minimum
 
         if (GetFileCapacity(lo, filesystem) >= fileSizeBytes)
             return lo;

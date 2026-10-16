@@ -54,6 +54,8 @@ namespace VeraCryptNet
 	size_t ExFatReadFile (ExFatFileHandle *file, unsigned char *buffer, size_t length);
 	size_t ExFatWriteFile (ExFatFileHandle *file, const unsigned char *buffer, size_t length);
 	void ExFatSeekFile (ExFatFileHandle *file, unsigned long long position);
+	unsigned long long ExFatTellFile (ExFatFileHandle *file);
+	void ExFatFlushFile (ExFatFileHandle *file);
 	void ExFatCloseFile (ExFatFileHandle *file);   // flushes + destroys
 
 	// Total capacity (all clusters), free space and cluster size, in bytes.

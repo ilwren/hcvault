@@ -34,6 +34,7 @@ param(
     [switch]$Clean,
     [switch]$SkipNative,
     [switch]$SkipManaged,
+    [switch]$SkipTests,        # build everything but skip the managed test suite
     [switch]$NoDownload        # never fetch a portable ninja automatically
 )
 
@@ -337,8 +338,11 @@ if (-not $SkipManaged) {
     # architecture mismatch. With no library at all the tests are skipped with
     # a note - only the tests need it, the managed and demo builds do not.
     $testLib = Join-Path $native "runtimes\$hostRid\native\hcvault-core.dll"
-    $runTests = $true
-    if (-not (Test-Path $testLib)) {
+    $runTests = -not $SkipTests
+    if ($SkipTests) {
+        Write-Host '  managed tests skipped (-SkipTests)' -ForegroundColor Yellow
+    }
+    if ($runTests -and -not (Test-Path $testLib)) {
         $built = @(Get-ChildItem -Path (Join-Path $native 'runtimes\win-*\native\hcvault-core.dll') -ErrorAction SilentlyContinue)
         if ($built.Count -gt 0) {
             $testLib = $built[0].FullName
@@ -391,7 +395,7 @@ if (-not $SkipManaged) {
     if ($runTests) {
         Write-Host '  -> managed + Avalonia app built, managed tests passed' -ForegroundColor Green
     } else {
-        Write-Host '  -> managed + Avalonia app built (managed tests skipped: no native library)' -ForegroundColor Yellow
+        Write-Host '  -> managed + Avalonia app built (managed tests skipped)' -ForegroundColor Yellow
     }
 }
 
@@ -419,15 +423,25 @@ if ($Pack) {
 
     # the packages must carry the URL of the repository they are built
     # from (CI passes it explicitly; locally derive it from the git origin)
+    # the packages embed the URL of the repository they are built from.
+    # CI always passes it explicitly; a git checkout provides it via the
+    # origin remote; anything else (e.g. a downloaded source tree) falls
+    # back to the project's home URL - such packages are for local use.
     $repoUrl = $env:PACK_REPO_URL
-    if (-not $repoUrl) {
-        $origin = @(git -C $root remote get-url origin 2>$null)
+    if (-not $repoUrl -and (Test-Path -LiteralPath (Join-Path $root '.git'))) {
+        # $ErrorActionPreference is 'Stop' here, and a redirected native
+        # stderr line (git's "fatal: ..." / "error: ...") would become a
+        # terminating error - drop it for this call only
+        $prevEap = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { $origin = @(git -C $root remote get-url origin 2>$null) } finally { $ErrorActionPreference = $prevEap }
         if ($origin.Count -gt 0 -and $origin[0]) {
             $repoUrl = ($origin[0] -replace '^git@([^:]+):', 'https://$1/') -replace '\.git$', ''
         }
     }
     if (-not $repoUrl) {
-        throw "Cannot determine the repository URL (no git remote 'origin'). Set PACK_REPO_URL=https://github.com/<owner>/<repo> and retry."
+        $repoUrl = 'https://github.com/ilwren/hcvault'
+        Write-Host "  no git repository and no PACK_REPO_URL - embedding the default project URL $repoUrl (set PACK_REPO_URL=https://github.com/<owner>/<repo> to override)" -ForegroundColor Yellow
     }
     Write-Host "  repository url: $repoUrl"
 

@@ -96,7 +96,7 @@ It cannot:
 | Volume format | creates V2 (current); opens V2 and legacy V1; normal + hidden volumes. Official VeraCrypt opens these volumes and vice versa (Argon2id volumes require VeraCrypt 2016 or later) |
 | Native core | Windows x64 / x86 / ARM64 (MSVC), Linux x64 (GCC/Clang), Android arm64-v8a / armeabi-v7a / x86 / x86_64 (API 21+, NDK r26/r27, 16 KB page aligned). macOS builds on its POSIX base but is not tested |
 | Managed wrapper | .NET 8 and .NET 10 (`net8.0;net10.0`), Native AOT compatible |
-| Python package | 1.6.2 — Python 3.8+ (pure ctypes, no dependencies; the wheel bundles the native library, linux-x64 from CI) |
+| Python package | 1.6.3 — Python 3.8+ (pure ctypes, no dependencies; the wheel bundles the native library, linux-x64 from CI) |
 | Demos | HCVault.Explorer: Avalonia UI (Windows x64 / linux-x64 / macOS arm64), published as Native AOT single-file executables. MAUI (Android 7.0 / API 24+), plain .NET Android (Android 5.0 / API 21+) |
 | Based on | VeraCrypt 1.26.29, FatFs R0.15 |
 
@@ -196,7 +196,7 @@ portable Ninja — `-NoDownload` / `VCN_NO_DOWNLOAD=1` disables that).
 CI runs the automated test suite (native + managed, both target
 frameworks, the Python wrapper, and a Native AOT smoke test) on every push: [.github/workflows/build-demos.yml](.github/workflows/build-demos.yml).
 Releases are published manually: Actions → build-demos → Run workflow →
-enter the version tag (e.g. `v1.6.2`, must match the project version).
+enter the version tag (e.g. `v1.6.3`, must match the project version).
 That run builds every platform and attaches the binaries to a GitHub
 Release: the Avalonia demo as Native AOT single-file executables (win-x64
 zip, linux-x64 / macos-arm64 tar.gz - no .NET runtime needed, macOS best

@@ -172,10 +172,18 @@ including on a wrong password (that is what makes guessing expensive).
 | `KeyFileStreams` | `IReadOnlyList<Stream>?` | null | stream form of the same keyfiles (see the note under *Creating volumes*) |
 | `ReadOnly` | `bool` | `false` | write-protected handle (reads and `GetSpace` still work) |
 | `UseBackupHeader` | `bool` | `false` | try the embedded backup header first — use when the primary header is damaged |
+| `Kdf` | `VcKdf?` | null | the KDF the volume was created with — skips the try-every-KDF search; wrong credentials then fail after a single derivation (a fraction of the time and memory). No downside when the value is known |
 
 Volumes created by this library use the current V2 layout; the official
 application's V2 **and** legacy V1 volumes open as well. Argon2id volumes
 require VeraCrypt 2016+ on the other side.
+
+Because the header is encrypted, a volume does not reveal which KDF it
+uses: by default every open derives keys with every supported KDF (and
+every failed attempt pays that full search, including a complete Argon2
+pass per layout). Set `Kdf` to the value used at creation and the open
+runs exactly that KDF - wrong credentials then fail in a fraction of the
+time and memory.
 
 Properties of an open `Volume`:
 
@@ -284,6 +292,7 @@ the root. Unicode names are supported (LFN on FAT, UTF-8 on exFAT).
 | `CreateDirectory(path)` | parent must exist |
 | `Delete(path)` | file, or an **empty** directory |
 | `GetSpace()` | live `VolumeSpace` (below) |
+| `OpenFile(path, mode)` | `Stream` over one file — random-position reads, in-place writes, zero-filled holes, appends (`VcFileMode.Read` / `Create` / `Append`) |
 
 `VolumeSpace` (all in bytes, live values):
 
@@ -327,6 +336,29 @@ Every read, write and transfer above has an `...Async` counterpart
 the same semantics as `Volume.CreateAsync`: the cancellation token only
 prevents an operation that has not started yet.
 
+### Streaming access and re-formatting
+
+`OpenFile` returns a `Stream` over a single file inside the volume:
+random-position reads, in-place writes, zero-filled holes and appends, in
+constant memory — `ReadFile`/`WriteFile` remain the simple whole-file
+option.
+
+```csharp
+using var s = fs.OpenFile("video.mkv", VcFileMode.Read);
+s.Seek(64 * 1024, SeekOrigin.Begin);   // read a header without loading gigabytes
+```
+
+Writes that grow the file update its directory entry immediately (an
+interrupted stream never lengthens a file beyond what was written);
+`SetLength` is not supported — open with `VcFileMode.Create` to truncate.
+On exFAT the stream is backed by the native FatFs bridge (vcapi v6 adds
+tell/size/flush), on FAT by the managed driver.
+
+`VolumeFilesystem.FormatExFat(volume)` formats the data area of an open
+volume as exFAT in place, destroying its contents — a FAT volume converts
+without recreating the container, and a `Filesystem.None` volume gains a
+filesystem. Mount afterwards to use it.
+
 ### Sizing a container
 
 `ContainerSize` answers sizing questions exactly, using the same geometry
@@ -336,7 +368,7 @@ and system clusters, automatic cluster-size steps):
 | Method | Returns |
 |---|---|
 | `GetFileCapacity(containerSizeBytes, filesystem)` | the largest single file a freshly created container of that size can hold |
-| `GetRequiredContainerSize(fileSizeBytes, filesystem)` | the smallest container (multiple of 512, ≥ 200 KiB) that can hold one file of that size |
+| `GetRequiredContainerSize(fileSizeBytes, filesystem)` | the smallest container (multiple of 512) that can hold one file of that size; never below what `Volume.Create` accepts for that filesystem |
 
 ```csharp
 long container = ContainerSize.GetRequiredContainerSize(
@@ -424,7 +456,7 @@ int main(void)
     if (rc != VC_OK) { fprintf(stderr, "create: %s\n", vc_last_error()); return 1; }
 
     vc_volume *v = vc_open_volume("demo.hc", "correct horse battery staple", 27,
-                                  NULL, 0, 0, 0, 0);
+                                  NULL, 0, 0, 0, 0, NULL);  /* last arg: KDF hint, NULL = auto */
     if (!v) { fprintf(stderr, "open: %s\n", vc_last_error()); return 1; }
     printf("data area: %llu bytes, sector %u, %s/%s\n",
            (unsigned long long)vc_get_data_size(v),
@@ -532,7 +564,7 @@ calling thread with the stage constants `VC_STAGE_WRITING_DATA` (1),
 
 | Function | Description |
 |---|---|
-| `vc_open_volume(path, password, password_len, keyfile_paths, keyfile_count, pim, read_only, use_backup_header)` | returns `NULL` on failure |
+| `vc_open_volume(path, password, password_len, keyfile_paths, keyfile_count, pim, read_only, use_backup_header, kdf_name)` | returns `NULL` on failure; `kdf_name` NULL/"" = try every KDF, e.g. `"Argon2"` / `"SHA-512"` = use only that one |
 | `vc_close_volume(v)` | destroy the handle |
 | `vc_read_sectors(v, buf, offset, len)` / `vc_write_sectors(v, buf, offset, len)` | sector-aligned I/O; byte count or negative status |
 | `vc_get_data_size(v)` | usable data area in bytes |
@@ -555,6 +587,8 @@ wipe_count)` — same semantics as the managed `ChangePassword` (§1);
 | `vc_exfat_opendir(fs, path)` / `vc_exfat_readdir(dir, out)` / `vc_exfat_closedir(dir)` | `readdir` returns 1 = entry, 0 = end, < 0 = error |
 | `vc_exfat_open(fs, path, mode)` | mode 0 = read existing, 1 = create/truncate, 2 = open/append |
 | `vc_exfat_read(f, buf, len)` / `vc_exfat_write(f, buf, len)` | byte counts, or negative status; a short write means the volume is full |
+| `vc_exfat_tell(f)` / `vc_exfat_size(f)` / `vc_exfat_flush(f)` | stream position, file length, explicit flush (f_sync) |
+| `vc_exfat_format(volume)` | format an open volume's data area as exFAT (contents destroyed) |
 | `vc_exfat_seek(f, position)` / `vc_exfat_close(f)` | close flushes |
 
 `vc_exfat_entry` fields: `name[256]` (UTF-8, NUL-terminated), `is_directory`,
@@ -600,7 +634,19 @@ combined with the password bytes. Legacy V1 volumes open read/write.
   every open runs it **once — including failed attempts**. With the default
   PIM, Argon2id uses 416 MiB of memory and 6 passes (VeraCrypt defaults);
   on mobile hardware prefer `VcKdf.HmacSha512` when startup time matters
-  and the threat model allows it.
+  and the threat model allows it. The Argon2 memory cost scales with the
+  PIM (64 MiB + 32 MiB per step, capped at 1 GiB — PIM 22 means 736 MiB)
+  and is allocated and released for a few seconds on every open: this is
+  the memory-hard design, not a leak, and the official application behaves
+  the same way.
+- **A wrong password / keyfile / PIM is expensive on purpose.** The header
+  is encrypted, so the core cannot know which KDF the volume uses - a
+  failed attempt derives keys with **every** supported KDF (including a
+  full Argon2 pass) and, for normal opens, additionally tries the hidden
+  volume layouts before giving up. Expect several seconds and the Argon2
+  memory spike per attempt, then a `VcWrongPasswordException` - which you
+  should catch instead of letting it terminate the process. Use the exact
+  PIM (and keyfiles) to keep failed attempts as rare as real ones.
 - `Quick = true` skips the pre-format overwrite of the data area — the area
   is still fully encrypted, but pre-existing plaintext patterns remain
   visible in the ciphertext statistics. Use a full format when the previous

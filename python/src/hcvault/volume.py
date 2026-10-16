@@ -105,8 +105,14 @@ class Volume:
         keyfiles: Sequence[str] = (),
         read_only: bool = False,
         use_backup_header: bool = False,
+        kdf: VcKdf | None = None,
     ) -> "Volume":
-        """Open a volume with password / keyfiles / PIM."""
+        """Open a volume with password / keyfiles / PIM.
+
+        ``kdf``: the KDF the volume was created with (e.g.
+        ``VcKdf.ARGON2ID``). None tries every supported KDF; passing the
+        known KDF makes failed attempts fail after a single derivation
+        instead of a full search."""
         if not isinstance(password, SecurePassword):
             raise TypeError("password must be a SecurePassword (SecurePassword.from_str)")
 
@@ -122,6 +128,7 @@ class Volume:
             pim,
             1 if read_only else 0,
             1 if use_backup_header else 0,
+            kdf.native_name.encode("utf-8") if kdf is not None else None,
         )
         _ = kf_arr, pw_buf
         return cls(_native.raise_for_null(handle, "vc_open_volume"))

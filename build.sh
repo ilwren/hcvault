@@ -27,7 +27,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 NATIVE="$ROOT/native"
 ARCH=linux
-DO_LINUX=1 DO_ANDROID=0 DO_PACK=0 DO_CLEAN=0 SKIP_NATIVE=0 SKIP_MANAGED=0
+DO_LINUX=1 DO_ANDROID=0 DO_PACK=0 DO_CLEAN=0 SKIP_NATIVE=0 SKIP_MANAGED=0 SKIP_TESTS=0
 
 # ELF machine code this host builds/runs (used to verify the built libraries)
 case "$(uname -m)" in
@@ -56,7 +56,8 @@ for arg in "$@"; do
         --clean)         DO_CLEAN=1 ;;
         --skip-native)   SKIP_NATIVE=1 ;;
         --skip-managed)  SKIP_MANAGED=1 ;;
-        *) echo "unknown option: $arg (use --android --pack --clean --skip-native --skip-managed)"; exit 2 ;;
+        --skip-tests)    SKIP_TESTS=1 ;;
+        *) echo "unknown option: $arg (use --android --pack --clean --skip-native --skip-managed --skip-tests)"; exit 2 ;;
     esac
 done
 
@@ -171,6 +172,10 @@ if [ "$SKIP_MANAGED" = 0 ]; then
     esac
     LIB="$NATIVE/runtimes/$RID/native/libhcvault-core.so"
     RUN_TESTS=1
+    if [ "$SKIP_TESTS" = 1 ]; then
+        RUN_TESTS=0
+        echo '  managed tests skipped (--skip-tests)'
+    fi
     if [ ! -f "$LIB" ]; then
         # fall back to another linux build (never an Android .so - bionic
         # libraries cannot load into a glibc process anyway)
@@ -228,11 +233,17 @@ if [ "$DO_PACK" = 1 ]; then
     [ "$miss" = 0 ] || exit 1
     # the packages must carry the URL of the repository they are built
     # from (CI passes it explicitly; locally derive it from the git origin)
-    repo_url="${PACK_REPO_URL:-$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')}"
+    # the packages embed the URL of the repository they are built from.
+    # CI always passes it explicitly; a git checkout provides it via the
+    # origin remote; anything else (e.g. a downloaded source tree) falls
+    # back to the project's home URL - such packages are for local use.
+    repo_url="${PACK_REPO_URL:-}"
+    if [ -z "$repo_url" ] && [ -e "$ROOT/.git" ]; then
+        repo_url="$(git -C "$ROOT" remote get-url origin 2>/dev/null | sed -E 's#^git@([^:]+):#https://\1/#; s#\.git$##')"
+    fi
     if [ -z "$repo_url" ]; then
-        echo "cannot determine the repository URL - no git remote 'origin'." >&2
-        echo "set PACK_REPO_URL=https://github.com/<owner>/<repo> and retry" >&2
-        exit 1
+        repo_url="https://github.com/ilwren/hcvault"
+        echo "  no git repository and no PACK_REPO_URL - embedding the default project URL $repo_url (set PACK_REPO_URL=https://github.com/<owner>/<repo> to override)"
     fi
     echo "  repository url: $repo_url"
     dotnet pack "$NATIVE/HCVault.Native.pack.csproj" -c Release \

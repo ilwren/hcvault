@@ -9,7 +9,7 @@ namespace HCVault.Core.Interop;
 /// </summary>
 internal static partial class NativeMethods
 {
-    public const int ApiVersion = 4;
+    public const int ApiVersion = 6;
 
     // ------------------------------------------------------------------ status
 
@@ -67,7 +67,8 @@ internal static partial class NativeMethods
         ReadOnlySpan<byte> password, nuint passwordLen,
         [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPUTF8Str)] string[] keyfilePaths,
         nuint keyfileCount,
-        int pim, int readOnly, int useBackupHeader);
+        int pim, int readOnly, int useBackupHeader,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string? kdfName);
 
     [LibraryImport(NativeLoader.LibraryName)]
     internal static partial long vc_read_sectors(IntPtr volume, byte[] buffer, ulong offset, nuint length);
@@ -143,6 +144,15 @@ internal static partial class NativeMethods
 
     [LibraryImport(NativeLoader.LibraryName)]
     internal static partial int vc_exfat_close(IntPtr file);
+
+    [LibraryImport(NativeLoader.LibraryName)]
+    internal static partial ulong vc_exfat_tell(IntPtr file);
+
+    [LibraryImport(NativeLoader.LibraryName)]
+    internal static partial ulong vc_exfat_size(IntPtr file);
+
+    [LibraryImport(NativeLoader.LibraryName)]
+    internal static partial int vc_exfat_flush(IntPtr file);
 
     /// <summary>Mirrors <c>vc_exfat_entry</c> from vcapi.h (blittable).</summary>
     [StructLayout(LayoutKind.Sequential)]

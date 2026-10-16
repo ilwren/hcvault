@@ -78,6 +78,13 @@ namespace VeraCryptNet
 		DriveSlot g_slots[FF_VOLUMES];
 		std::mutex g_slotMutex;
 
+		// ff.c is built with FF_FS_REENTRANT = 0 and keeps process-global
+		// state (the FatFs[FF_VOLUMES] work-area registry read by every path
+		// resolution and written by f_mount/f_mkfs). ALL ff.c entry points
+		// must therefore be serialized process-wide, not just per mount:
+		// concurrent mounts on *different* volumes race on that registry.
+		std::mutex g_ffApiMutex;
+
 		shared_ptr<Volume> Lookup (BYTE pdrv)
 		{
 			std::lock_guard<std::mutex> lock (g_slotMutex);
@@ -250,7 +257,6 @@ namespace VeraCryptNet
 		shared_ptr<Volume> Vol;
 		int Slot = -1;
 		FATFS Fs {};
-		std::mutex Mutex;
 
 		~ExFatMountState ();
 		const char* Path () const;
@@ -287,6 +293,15 @@ namespace VeraCryptNet
 		return p;
 	}
 
+// ff.c resolves paths WITHOUT a "N:" drive prefix against the
+	// process-global current drive (set by the last f_mount anywhere).
+	// Every path API call must therefore be pinned to the mount's own
+	// drive slot, or concurrent mounts race for that implicit drive.
+	static std::string SlotPath (const ExFatMountState *mount, const std::string &utf8Path)
+	{
+		return std::to_string (mount->Slot) + ":" + NormalizePath (utf8Path);
+	}
+
 	static void RequireSectorSize (const shared_ptr<Volume> &vol)
 	{
 		if (vol->GetSectorSize () != 512)
@@ -300,6 +315,7 @@ namespace VeraCryptNet
 	void ExFatFormat (const shared_ptr<Volume> &volume)
 	{
 		RequireSectorSize (volume);
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 		int slot = AcquireSlot (volume);
 		try
 		{
@@ -331,6 +347,7 @@ namespace VeraCryptNet
 	{
 		RequireSectorSize (volume);
 
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 		int slot = AcquireSlot (volume);
 		auto *m = new ExFatMountState;
 		m->Vol = std::move (volume);
@@ -349,6 +366,7 @@ namespace VeraCryptNet
 
 	void ExFatUnmount (ExFatMountState *mount)
 	{
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 		delete mount;
 	}
 
@@ -356,8 +374,8 @@ namespace VeraCryptNet
 	{
 		auto *d = new ExFatDirHandle;
 		d->M = mount;
-		std::lock_guard<std::mutex> lock (mount->Mutex);
-		FRESULT fr = f_opendir (&d->D, NormalizePath (utf8Path).c_str ());
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
+		FRESULT fr = f_opendir (&d->D, SlotPath (mount, utf8Path).c_str ());
 		if (fr != FR_OK)
 		{
 			delete d;
@@ -369,7 +387,7 @@ namespace VeraCryptNet
 	bool ExFatReadDir (ExFatDirHandle *dir, std::string &outName, bool &outIsDir,
 		unsigned long long &outSize, unsigned short &outDate, unsigned short &outTime)
 	{
-		std::lock_guard<std::mutex> lock (dir->M->Mutex);
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 		FILINFO fno;
 		if (f_readdir (&dir->D, &fno) != FR_OK || fno.fname[0] == 0)
 			return false;
@@ -394,8 +412,8 @@ namespace VeraCryptNet
 
 		auto *f = new ExFatFileHandle;
 		f->M = mount;
-		std::lock_guard<std::mutex> lock (mount->Mutex);
-		FRESULT fr = f_open (&f->F, NormalizePath (utf8Path).c_str (), flags);
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
+		FRESULT fr = f_open (&f->F, SlotPath (mount, utf8Path).c_str (), flags);
 		if (fr != FR_OK)
 		{
 			delete f;
@@ -406,12 +424,13 @@ namespace VeraCryptNet
 
 	unsigned long long ExFatFileSize (ExFatFileHandle *file)
 	{
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 		return f_size (&file->F);
 	}
 
 	size_t ExFatReadFile (ExFatFileHandle *file, unsigned char *buffer, size_t length)
 	{
-		std::lock_guard<std::mutex> lock (file->M->Mutex);
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 		UINT done = 0;
 		CheckFr ("read file", f_read (&file->F, buffer, (UINT) length, &done));
 		return done;
@@ -419,7 +438,7 @@ namespace VeraCryptNet
 
 	size_t ExFatWriteFile (ExFatFileHandle *file, const unsigned char *buffer, size_t length)
 	{
-		std::lock_guard<std::mutex> lock (file->M->Mutex);
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 		UINT done = 0;
 		CheckFr ("write file", f_write (&file->F, buffer, (UINT) length, &done));
 		if (done != length)
@@ -429,13 +448,25 @@ namespace VeraCryptNet
 
 	void ExFatSeekFile (ExFatFileHandle *file, unsigned long long position)
 	{
-		std::lock_guard<std::mutex> lock (file->M->Mutex);
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 		CheckFr ("seek file", f_lseek (&file->F, (FSIZE_t) position));
+	}
+
+	unsigned long long ExFatTellFile (ExFatFileHandle *file)
+	{
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
+		return f_tell (&file->F);
+	}
+
+	void ExFatFlushFile (ExFatFileHandle *file)
+	{
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
+		CheckFr ("flush file", f_sync (&file->F));
 	}
 
 	void ExFatCloseFile (ExFatFileHandle *file)
 	{
-		std::lock_guard<std::mutex> lock (file->M->Mutex);
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 		FRESULT fr = f_close (&file->F);
 		delete file;
 		CheckFr ("close file", fr);
@@ -443,14 +474,14 @@ namespace VeraCryptNet
 
 	void ExFatMkdir (ExFatMountState *mount, const std::string &utf8Path)
 	{
-		std::lock_guard<std::mutex> lock (mount->Mutex);
-		CheckFr ("create directory", f_mkdir (NormalizePath (utf8Path).c_str ()));
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
+		CheckFr ("create directory", f_mkdir (SlotPath (mount, utf8Path).c_str ()));
 	}
 
 	void ExFatDelete (ExFatMountState *mount, const std::string &utf8Path)
 	{
-		std::lock_guard<std::mutex> lock (mount->Mutex);
-		CheckFr ("delete", f_unlink (NormalizePath (utf8Path).c_str ()));
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
+		CheckFr ("delete", f_unlink (SlotPath (mount, utf8Path).c_str ()));
 	}
 
 	void ExFatGetSpace (ExFatMountState *mount,
@@ -458,7 +489,7 @@ namespace VeraCryptNet
 	                    unsigned long long &outFreeBytes,
 	                    unsigned long long &outClusterBytes)
 	{
-		std::lock_guard<std::mutex> lock (mount->Mutex);
+		std::lock_guard<std::mutex> lock (g_ffApiMutex);
 
 		DWORD freeClusters = 0;
 		FATFS *fs = nullptr;

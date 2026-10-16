@@ -104,3 +104,16 @@ internal static class EnumNames
         _ => throw new ArgumentOutOfRangeException(nameof(kdf)),
     };
 }
+
+/// <summary>How <see cref="IVolumeFileSystem.OpenFile" /> opens a file.</summary>
+public enum VcFileMode
+{
+    /// <summary>Open an existing file for reading only.</summary>
+    Read = 0,
+
+    /// <summary>Create a new file (or truncate an existing one) for reading and writing.</summary>
+    Create = 1,
+
+    /// <summary>Open an existing file for reading and writing, positioned at its end.</summary>
+    Append = 2,
+}

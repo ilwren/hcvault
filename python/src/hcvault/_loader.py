@@ -20,7 +20,7 @@ from pathlib import Path
 
 from .errors import VcLibraryNotFoundError, VcUnsupportedError
 
-VC_API_VERSION = 4
+VC_API_VERSION = 6
 LIBRARY_NAME = "hcvault-core"
 
 _lock = threading.Lock()

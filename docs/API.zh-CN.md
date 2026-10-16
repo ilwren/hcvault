@@ -160,9 +160,15 @@ catch (VcWrongPasswordException) { /* 重新询问 / 放弃 */ }
 | `KeyFileStreams` | `IReadOnlyList<Stream>?` | null | 同一批密钥的流形式（说明见“创建卷”） |
 | `ReadOnly` | `bool` | `false` | 只读句柄（读取和 `GetSpace` 不受影响） |
 | `UseBackupHeader` | `bool` | `false` | 优先尝试内嵌备份头——主头损坏时使用 |
+| `Kdf` | `VcKdf?` | null | 创建卷时用的 KDF——跳过“逐个 KDF 全试”的搜索，错误凭据一次派生即失败（时间与内存都只剩零头）。已知该值时没有理由不填 |
 
 本库创建的卷是当前 V2 布局；官方程序的 V2 和旧版 V1 卷都能打开。
 Argon2id 卷在对方是 2016 年后的 VeraCrypt 才能打开。
+
+卷头是加密的，卷本身不会暴露它用的 KDF：默认情况下每次打开都会用
+所有支持的 KDF 各派生一遍（失败的尝试也要付全款，含每个布局一整轮
+Argon2）。把 `Kdf` 设为创建时的值，打开就只跑该 KDF——错误凭据的
+失败时间与内存都只剩零头。
 
 打开后的 `Volume` 属性：
 
@@ -266,6 +272,7 @@ UTF-8）。
 | `CreateDirectory(path)` | 父目录必须存在 |
 | `Delete(path)` | 文件，或**空**目录 |
 | `GetSpace()` | 实时 `VolumeSpace`（见下） |
+| `OpenFile(path, mode)` | 单文件的 `Stream`——随机定位读、就地写、零填充空洞、追加（`VcFileMode.Read` / `Create` / `Append`） |
 
 `VolumeSpace`（单位字节，实时值）：
 
@@ -307,6 +314,26 @@ fs.ExportDirectory("\\Documents", @"D:\restore\Documents");
 在线程池线程上执行；语义与 `Volume.CreateAsync` 相同：取消令牌只能
 阻止尚未开始的操作。
 
+### 流式访问与原地重格式化
+
+`OpenFile` 返回卷内单个文件的 `Stream`：随机定位读、就地写、零填充
+空洞与追加，内存占用恒定——`ReadFile`/`WriteFile` 仍是简单的整文件
+选项。
+
+```csharp
+using var s = fs.OpenFile("video.mkv", VcFileMode.Read);
+s.Seek(64 * 1024, SeekOrigin.Begin);   // 只读文件头，无需载入整个大文件
+```
+
+使文件增长的写操作会立即更新目录项（流被中断时文件长度绝不会超过
+已写入的部分）；不支持 `SetLength`——需要截断请用 `VcFileMode.Create`
+打开。exFAT 的流由原生 FatFs 桥支撑（vcapi v6 新增 tell/size/flush），
+FAT 由托管驱动实现。
+
+`VolumeFilesystem.FormatExFat(volume)` 把已打开卷的数据区原地格式化为
+exFAT（内容清空）——FAT 卷无需重建容器即可转换，`Filesystem.None` 的卷
+由此获得文件系统。之后 Mount 即可使用。
+
 ### 计算容器大小
 
 `ContainerSize` 精确回答容量问题，几何口径与内置格式化器完全一致
@@ -315,7 +342,7 @@ fs.ExportDirectory("\\Documents", @"D:\restore\Documents");
 | 方法 | 返回值 |
 |---|---|
 | `GetFileCapacity(containerSizeBytes, filesystem)` | 该大小的全新容器能容纳的单个最大文件 |
-| `GetRequiredContainerSize(fileSizeBytes, filesystem)` | 能容纳该大小单个文件的最小容器（512 的倍数，≥ 200 KiB） |
+| `GetRequiredContainerSize(fileSizeBytes, filesystem)` | 能容纳该大小单个文件的最小容器（512 的倍数；不会低于 `Volume.Create` 对该文件系统的下限） |
 
 ```csharp
 long container = ContainerSize.GetRequiredContainerSize(
@@ -399,7 +426,7 @@ int main(void)
     if (rc != VC_OK) { fprintf(stderr, "create: %s\n", vc_last_error()); return 1; }
 
     vc_volume *v = vc_open_volume("demo.hc", "correct horse battery staple", 27,
-                                  NULL, 0, 0, 0, 0);
+                                  NULL, 0, 0, 0, 0, NULL);  /* 末参：KDF 提示，NULL = 自动 */
     if (!v) { fprintf(stderr, "open: %s\n", vc_last_error()); return 1; }
     printf("data area: %llu bytes, sector %u, %s/%s\n",
            (unsigned long long)vc_get_data_size(v),
@@ -503,7 +530,7 @@ hidden, progress, progress_user)`——创建普通卷或隐藏卷。
 
 | 函数 | 说明 |
 |---|---|
-| `vc_open_volume(path, password, password_len, keyfile_paths, keyfile_count, pim, read_only, use_backup_header)` | 失败返回 `NULL` |
+| `vc_open_volume(path, password, password_len, keyfile_paths, keyfile_count, pim, read_only, use_backup_header, kdf_name)` | 失败返回 `NULL`；`kdf_name` 为 NULL/"" = 逐个尝试所有 KDF，如 `"Argon2"` / `"SHA-512"` = 只用该 KDF |
 | `vc_close_volume(v)` | 销毁句柄 |
 | `vc_read_sectors(v, buf, offset, len)` / `vc_write_sectors(v, buf, offset, len)` | 扇区对齐 I/O；返回字节数或负状态码 |
 | `vc_get_data_size(v)` | 数据区可用字节数 |
@@ -527,6 +554,8 @@ wipe_count)`——与托管 `ChangePassword`（第 1 节）语义相同；
 | `vc_exfat_open(fs, path, mode)` | mode 0 = 读现有，1 = 创建/截断，2 = 打开/追加 |
 | `vc_exfat_read(f, buf, len)` / `vc_exfat_write(f, buf, len)` | 返回字节数或负状态码；短写说明卷满 |
 | `vc_exfat_seek(f, position)` / `vc_exfat_close(f)` | close 会刷新 |
+| `vc_exfat_tell(f)` / `vc_exfat_size(f)` / `vc_exfat_flush(f)` | 流位置、文件长度、显式刷新（f_sync） |
+| `vc_exfat_format(volume)` | 把已打开卷的数据区格式化为 exFAT（内容清空） |
 
 `vc_exfat_entry` 字段：`name[256]`（UTF-8，NUL 结尾）、`is_directory`、
 `size`、`modified_date` / `modified_time`（FAT 日期/时间编码，UTC）、
@@ -567,7 +596,14 @@ VeraCrypt 程序完全一致——按列出顺序构建密钥文件池，再与�
 - 创建卷要跑 **2 次**头部 KDF（主头 + 备份头），每次打开跑 **1 次——
   尝试失败也算**。默认 PIM 下 Argon2id 用 416 MiB 内存、6 遍迭代
   （VeraCrypt 默认值）；移动端若在意启动时间，且威胁模型允许，可选用
-  `VcKdf.HmacSha512`。
+  `VcKdf.HmacSha512`。Argon2 内存代价随 PIM 增长（64 MiB 起步、每档
+  +32 MiB、上限 1 GiB——PIM 22 即 736 MiB），每次打开都会分配并在数秒
+  后释放：这是内存硬化设计，不是泄漏；官方程序同样如此。
+- **密码 / 密钥文件 / PIM 错误时代价高昂（有意为之）。** 卷头是加密
+  的，核心无从预知卷用的哪个 KDF——一次失败的尝试会把**所有**支持的
+  KDF 各派生一遍（含一次完整 Argon2），普通打开还会再尝试隐藏卷的布
+  局。每次失败尝试预期数秒、伴随 Argon2 内存尖峰，最后抛
+  `VcWrongPasswordException`——请捕获它，而不是让异常终止进程。
 - `Quick = true` 跳过格式化前对数据区的覆写——数据区仍然全量加密，
   但磁盘上原有明文的模式会残留在密文统计特征里。在意磁盘原内容时用
   完整格式化。

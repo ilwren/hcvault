@@ -94,6 +94,7 @@ def _bind(lib: ctypes.CDLL) -> None:
         ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_void_p, ctypes.c_size_t,
         ctypes.c_int32, ctypes.c_int32, ctypes.c_int32,
+        ctypes.c_char_p,
     ]
 
     lib.vc_read_sectors.restype = ctypes.c_int64

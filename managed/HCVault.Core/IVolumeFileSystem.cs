@@ -1,6 +1,7 @@
 using System.Text;
 using HCVault.Core.ExFat;
 using HCVault.Core.Fat;
+using HCVault.Core.Interop;
 
 namespace HCVault.Core;
 
@@ -33,6 +34,14 @@ public interface IVolumeFileSystem : IDisposable
 
     /// <summary>Total, free and used space of the mounted filesystem.</summary>
     VolumeSpace GetSpace();
+
+    /// <summary>
+    ///   Open a file for streaming access: random-position reads, in-place
+    ///   writes, zero-filled hole writes and appends - without holding the
+    ///   whole file in memory (whole-file semantics stay with
+    ///   <see cref="ReadFile" /> / <see cref="WriteFile" />).
+    /// </summary>
+    Stream OpenFile(string path, VcFileMode mode);
 }
 
 public static class VolumeFilesystem
@@ -67,5 +76,17 @@ public static class VolumeFilesystem
         throw new VcException(
             "The volume does not contain a recognized filesystem (FAT or exFAT). " +
             "Volumes created with Filesystem.None hold raw sectors only.");
+    }
+
+    /// <summary>
+    ///   Format the data area of an open volume as exFAT, destroying its
+    ///   contents - a FAT volume becomes exFAT without recreating the
+    ///   container, a <c>Filesystem.None</c> volume gains a filesystem.
+    ///   Mount afterwards to use it.
+    /// </summary>
+    public static void FormatExFat(Volume volume)
+    {
+        ArgumentNullException.ThrowIfNull(volume);
+        Status.ThrowIfFailed(NativeMethods.vc_exfat_format(volume.NativeHandle));
     }
 }

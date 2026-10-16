@@ -312,7 +312,8 @@ static shared_ptr<KeyfileList> MakeKeyfiles (const char *const *paths, size_t co
 static shared_ptr<Volume> OpenVolumeInternal (const char *path,
 	const char *password, size_t password_len,
 	const char *const *keyfile_paths, size_t keyfile_count,
-	int32_t pim, bool read_only, bool use_backup_header);
+	int32_t pim, bool read_only, bool use_backup_header,
+	const char *kdf_name);
 
 int32_t vc_create_volume (const char *path, uint64_t size_bytes,
                           const char *password, size_t password_len,
@@ -393,7 +394,7 @@ int32_t vc_create_volume (const char *path, uint64_t size_bytes,
 		{
 			// re-open with the fresh credentials and format the data area
 			shared_ptr<Volume> vol = OpenVolumeInternal (path, password, password_len,
-				keyfile_paths, keyfile_count, pim, false, false);
+				keyfile_paths, keyfile_count, pim, false, false, nullptr);
 			finally_do_arg (shared_ptr<Volume>, vol, { try { finally_arg->Close(); } catch (...) { } });
 			VeraCryptNet::ExFatFormat (vol);
 		}
@@ -419,18 +420,24 @@ struct vc_volume
 static shared_ptr<Volume> OpenVolumeInternal (const char *path,
 	const char *password, size_t password_len,
 	const char *const *keyfile_paths, size_t keyfile_count,
-	int32_t pim, bool read_only, bool use_backup_header)
+	int32_t pim, bool read_only, bool use_backup_header,
+	const char *kdf_name)
 {
 	shared_ptr<File> file (new File);
 	file->Open (VolumePath (Utf8ToWide (path)),
 		read_only ? File::OpenRead : File::OpenReadWrite,
 		File::ShareReadWrite);
 
+	// explicit KDF: skip the try-every-KDF search (NULL/"" = auto-detect)
+	shared_ptr<Pkcs5Kdf> kdf;
+	if (kdf_name && *kdf_name)
+		kdf = Pkcs5Kdf::GetAlgorithm (Utf8ToWide (kdf_name));
+
 	shared_ptr<Volume> vol (new Volume);
 	vol->Open (file,
 		MakePassword (password, password_len),
 		pim,
-		shared_ptr<Pkcs5Kdf> (),           // auto-detect KDF
+		kdf,
 		MakeKeyfiles (keyfile_paths, keyfile_count),
 		false,                              // EMV support disabled in this build
 		read_only ? VolumeProtection::ReadOnly : VolumeProtection::None,
@@ -444,7 +451,8 @@ static shared_ptr<Volume> OpenVolumeInternal (const char *path,
 vc_volume *vc_open_volume (const char *path,
                            const char *password, size_t password_len,
                            const char *const *keyfile_paths, size_t keyfile_count,
-                           int32_t pim, int32_t read_only, int32_t use_backup_header)
+                           int32_t pim, int32_t read_only, int32_t use_backup_header,
+                           const char *kdf_name)
 {
 	try
 	{
@@ -458,7 +466,7 @@ vc_volume *vc_open_volume (const char *path,
 		try
 		{
 			vol = OpenVolumeInternal (path, password, password_len,
-				keyfile_paths, keyfile_count, pim, read_only, use_backup_header != 0);
+				keyfile_paths, keyfile_count, pim, read_only, use_backup_header != 0, kdf_name);
 		}
 		catch (SystemException &e)
 		{
@@ -786,4 +794,30 @@ int32_t vc_exfat_close (vc_exfat_file *file)
 	}
 	catch (const exception &e) { delete file; return Translate (e); }
 	catch (...) { delete file; return Translate (); }
+}
+
+uint64_t vc_exfat_tell (vc_exfat_file *file)
+{
+	if (!file)
+		return 0;
+	return VeraCryptNet::ExFatTellFile (file->F);
+}
+
+uint64_t vc_exfat_size (vc_exfat_file *file)
+{
+	if (!file)
+		return 0;
+	return VeraCryptNet::ExFatFileSize (file->F);
+}
+
+int32_t vc_exfat_flush (vc_exfat_file *file)
+{
+	try
+	{
+		if (!file) { SetLastError ("invalid argument"); return VC_ERR_ARG; }
+		VeraCryptNet::ExFatFlushFile (file->F);
+		return VC_OK;
+	}
+	catch (const exception &e) { return Translate (e); }
+	catch (...) { return Translate (); }
 }

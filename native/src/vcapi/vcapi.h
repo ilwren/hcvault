@@ -35,7 +35,7 @@ extern "C" {
 #	define VC_API
 #endif
 
-#define VC_API_VERSION 4
+#define VC_API_VERSION 6
 
 /* opaque volume handle */
 typedef struct vc_volume vc_volume;
@@ -117,13 +117,19 @@ VC_API int32_t vc_create_volume (const char *path,
 
 /* Open a volume. Returns NULL on failure (call vc_last_error).
      read_only        : nonzero opens with write protection
-     use_backup_header: try the embedded backup header first */
+     use_backup_header: try the embedded backup header first
+     kdf_name         : NULL or "" tries every supported KDF (auto-detect,
+                        the slow-but-compatible default); a KDF name from
+                        vc_get_kdf_name() (e.g. "Argon2", "SHA-512") opens
+                        with exactly that KDF - wrong credentials then fail
+                        after a single derivation instead of a full search */
 VC_API vc_volume *vc_open_volume (const char *path,
                                   const char *password, size_t password_len,
                                   const char *const *keyfile_paths, size_t keyfile_count,
                                   int32_t pim,
                                   int32_t read_only,
-                                  int32_t use_backup_header);
+                                  int32_t use_backup_header,
+                                  const char *kdf_name);
 
 /* Sector-aligned encrypted I/O. Offsets are relative to the start of the
    volume's data area (decrypted view). `len` and `offset` must be multiples
@@ -202,6 +208,9 @@ VC_API int64_t vc_exfat_read  (vc_exfat_file *file, uint8_t *buffer, size_t len)
 VC_API int64_t vc_exfat_write (vc_exfat_file *file, const uint8_t *buffer, size_t len);
 VC_API int32_t vc_exfat_seek  (vc_exfat_file *file, uint64_t position);
 VC_API int32_t vc_exfat_close (vc_exfat_file *file);  /* flush + destroy handle */
+VC_API uint64_t vc_exfat_tell  (vc_exfat_file *file);  /* current position */
+VC_API uint64_t vc_exfat_size  (vc_exfat_file *file);  /* file size in bytes */
+VC_API int32_t  vc_exfat_flush (vc_exfat_file *file);  /* flush cached data (f_sync) */
 
 /* Space usage of a mounted exFAT filesystem. `total_bytes` is the capacity
    available to files (all clusters), `free_bytes` the unallocated part and

@@ -121,6 +121,18 @@ public sealed class ExFatVolume : IVolumeFileSystem
     }
 
     /// <inheritdoc />
+    public Stream OpenFile(string path, VcFileMode mode)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        ThrowIfDisposed();
+
+        IntPtr f = NativeMethods.vc_exfat_open(_fs, path, (int)mode);
+        if (f == IntPtr.Zero)
+            throw Status.ToException(NativeMethods.vc_last_status());
+        return new ExFatFileStream(f, mode);
+    }
+
+    /// <inheritdoc />
     public void CreateDirectory(string path)
     {
         ArgumentNullException.ThrowIfNull(path);

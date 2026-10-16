@@ -141,6 +141,13 @@ public sealed class FatVolume : IVolumeFileSystem
         return data;
     }
 
+    /// <inheritdoc />
+    public Stream OpenFile(string path, VcFileMode mode)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        return new FatFileStream(this, path, mode);
+    }
+
     /// <summary>Create or overwrite a file. Parent directories must exist.</summary>
     public void WriteFile(string path, ReadOnlySpan<byte> data)
     {
@@ -247,7 +254,7 @@ public sealed class FatVolume : IVolumeFileSystem
 
     // -------------------------------------------------------------- internals
 
-    private int ClusterBytes => _bytesPerSector * _sectorsPerCluster;
+    internal int ClusterBytes => _bytesPerSector * _sectorsPerCluster;
 
     private static uint ReadU16(byte[] b, int o) => (uint)(b[o] | (b[o + 1] << 8));
     private static uint ReadU32(byte[] b, int o) => (uint)(b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24));
@@ -280,9 +287,9 @@ public sealed class FatVolume : IVolumeFileSystem
     }
 
     private uint EofMarker => _isFat32 ? 0x0FFFFFF8u : _clusterCount < 4085 ? 0xFF8u : 0xFFF8u;
-    private uint BadOrEof => EofMarker;
+    internal uint BadOrEof => EofMarker;
 
-    private uint Next(uint cluster) => _fat[cluster];
+    internal uint Next(uint cluster) => _fat[cluster];
 
     private bool IsEof(uint v) => v >= EofMarker || v is 0;
 
@@ -291,7 +298,7 @@ public sealed class FatVolume : IVolumeFileSystem
 
     private long ClusterToOffset(uint cluster) => ClusterToSector(cluster) * _bytesPerSector;
 
-    private byte[] ReadCluster(uint cluster)
+    internal byte[] ReadCluster(uint cluster)
     {
         var buf = new byte[ClusterBytes];
         _stream.Seek(ClusterToOffset(cluster), SeekOrigin.Begin);
@@ -299,7 +306,7 @@ public sealed class FatVolume : IVolumeFileSystem
         return buf;
     }
 
-    private void WriteCluster(uint cluster, byte[] data)
+    internal void WriteCluster(uint cluster, byte[] data)
     {
         _stream.Seek(ClusterToOffset(cluster), SeekOrigin.Begin);
         _stream.Write(data, 0, ClusterBytes);
@@ -324,7 +331,30 @@ public sealed class FatVolume : IVolumeFileSystem
 
     // ----------------------------------------------------------- FAT writing
 
-    private uint AllocateChain(uint count)
+    /// <summary>Link `count` fresh clusters after `last`; returns the first new cluster.</summary>
+    internal uint ExtendChain(uint last, uint count)
+    {
+        if (count == 0)
+            return 0;
+        if (last < 2 || last >= BadOrEof)
+            throw new VcArgumentException("Cannot extend a chain from an invalid cluster.");
+
+        var found = new List<uint>();
+        for (uint c = 2; c < _clusterCount + 2 && found.Count < count; c++)
+            if (c < _fat.Length && _fat[c] == 0)
+                found.Add(c);
+
+        if (found.Count < count)
+            throw new IOException("Volume is full.");
+
+        _fat[last] = found[0];
+        for (int i = 0; i < found.Count - 1; i++)
+            _fat[found[i]] = found[i + 1];
+        _fat[found[^1]] = EofMarker;
+        return found[0];
+    }
+
+    internal uint AllocateChain(uint count)
     {
         if (count == 0)
             return 0;
@@ -343,7 +373,7 @@ public sealed class FatVolume : IVolumeFileSystem
         return found[0];
     }
 
-    private void FreeChain(uint first)
+    internal void FreeChain(uint first)
     {
         uint c = first;
         int guard = 0;
@@ -357,7 +387,7 @@ public sealed class FatVolume : IVolumeFileSystem
         }
     }
 
-    private void FlushFat()
+    internal void FlushFat()
     {
         int fatBytes = (int)(_fatSectors * _bytesPerSector);
         var copy = new byte[fatBytes];
@@ -417,7 +447,7 @@ public sealed class FatVolume : IVolumeFileSystem
         return (clusters, parts.Count == 0);
     }
 
-    private (List<uint> clusters, bool isRoot, string name) ResolveParent(string path)
+    internal (List<uint> clusters, bool isRoot, string name) ResolveParent(string path)
     {
         var parts = SplitPath(path);
         if (parts.Count == 0)
@@ -590,7 +620,7 @@ public sealed class FatVolume : IVolumeFileSystem
         return entry;
     }
 
-    private FatEntry? FindEntryIn(List<uint> clusters, bool isRoot, string name)
+    internal FatEntry? FindEntryIn(List<uint> clusters, bool isRoot, string name)
     {
         var entries = new List<FatEntry>();
         ReadDirEntries(clusters, isRoot, entries);
@@ -659,7 +689,7 @@ public sealed class FatVolume : IVolumeFileSystem
 
     // -------------------------------------------------------- dir entry write
 
-    private void WriteDirectoryEntry(List<uint> clusters, bool isRoot, string name,
+    internal void WriteDirectoryEntry(List<uint> clusters, bool isRoot, string name,
         uint firstCluster, uint size, bool isDirectory, string overwriteName)
     {
         var raw = ReadDirRegion(clusters, isRoot);
