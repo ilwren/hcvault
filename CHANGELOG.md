@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/) and the project
 follows semantic versioning.
 
+## 1.6.4 — 2026-10-21
+
+- **Fixed: the native loader crashed on Android instead of loading the
+  library.** `AppContext.BaseDirectory` is an empty string on .NET for
+  Android, and the loader passed it straight to `DirectoryInfo`, so the
+  first call into HCVault.Core died with
+  `ArgumentException: The value cannot be an empty string (Parameter 'path')`
+  before any load was attempted - the library could never be used from an
+  Android app. Directory probing is now best effort (a host without an
+  application directory simply contributes no candidates), Android asks the
+  platform loader by name first (the .so lives inside the APK at
+  `lib/{abi}/`), and a failure there reports the missing ABI with the exact
+  `RuntimeIdentifiers` / `AndroidNativeLibrary` fix - emulators are x86_64
+  while phones are arm64-v8a, which is the usual cause. The report also
+  lists the app's real native library directory and what was packaged into
+  it, so "the .so never shipped" is distinguishable from "it shipped but
+  the OS refused it" at a glance. Platforms where the host publishes no
+  runtime identifier (Android reports `"unknown"`) now derive one from the
+  process architecture instead of probing a `runtimes/unknown/` path.
+
 ## 1.6.3 — 2026-10-16
 
 - **New: streaming file access.** `IVolumeFileSystem.OpenFile(path,

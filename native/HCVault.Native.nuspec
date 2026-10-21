@@ -20,7 +20,7 @@
       (x64) and Android (arm64-v8a/armeabi-v7a/x86/x86_64). Build from the
       repository sources with CMake if you need another platform.
     </description>
-    <releaseNotes>1.6.3: library update, vcapi v4 to v6 - vc_open_volume gains a kdf_name parameter (NULL = auto-detect as before, a KDF name = open with exactly that KDF), and the exFAT file API gains vc_exfat_tell / vc_exfat_size / vc_exfat_flush for streaming access. Fixed: the exFAT bridge passed unprefixed paths to FatFs, which resolves them against a process-global current drive - with two volumes mounted at once, operations could hit the wrong mount; paths are now pinned to their own mount and all FatFs entry points are serialized, so volumes can be used concurrently from multiple threads. Volumes are compatible with 1.4.x/1.5.x/1.6.x; HCVault.Core 1.6.3 requires this vcapi v6 build.</releaseNotes>
+    <releaseNotes>1.6.4: no native changes - the binaries are identical in behavior to 1.6.3 (vcapi v6). The version is bumped in lockstep because HCVault.Core 1.6.4 depends on exactly this version. See the HCVault.Core 1.6.4 release notes for the Android native-loader fix.</releaseNotes>
     <copyright>Copyright VeraCrypt contributors; TrueCrypt Foundation; 2026 packaging</copyright>
     <tags>veracrypt;encryption;container;xts;aes;serpent;twofish;kuznyechik;camellia;argon2;native</tags>
     <repository type="git" url="$repositoryUrl$" />

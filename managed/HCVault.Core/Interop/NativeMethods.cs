@@ -4,7 +4,7 @@ using System.Text;
 namespace HCVault.Core.Interop;
 
 /// <summary>
-///   P/Invoke surface of the native hcvault-core library (vcapi.h, API version 4).
+///   P/Invoke surface of the native hcvault-core library (vcapi.h, API version 6).
 ///   The library name is resolved once by <see cref="NativeLoader" />.
 /// </summary>
 internal static partial class NativeMethods
@@ -223,12 +223,30 @@ internal static class NativeLoader
             if (Volatile.Read(ref _state) == StateLoaded)
                 return;
 
-            string rid = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier;
+            string rid = CurrentRid();
 
             // Candidates that exist on disk but were rejected by the OS loader
             // (wrong architecture, missing dependency, …) — keep the real error
             // so the hint can explain what actually went wrong.
             var rejected = new List<(string Path, string Error)>();
+
+            // Android ships the library inside the APK (lib/{abi}/libhcvault-core.so)
+            // and resolves it through the platform loader: there is no application
+            // directory to probe (AppContext.BaseDirectory is not a usable path
+            // there), so ask the loader by name first.
+            if (OperatingSystem.IsAndroid())
+            {
+                try
+                {
+                    NativeLibrary.Load(LibraryName);
+                    Volatile.Write(ref _state, StateLoaded);
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    LastLoadError = ex.Message;
+                }
+            }
 
             foreach (var candidate in BuildCandidateList())
             {
@@ -271,21 +289,50 @@ internal static class NativeLoader
         var env = Environment.GetEnvironmentVariable("VCNATIVE_HOME");
         if (!string.IsNullOrWhiteSpace(env))
         {
-            candidates.Add(Path.IsPathRooted(env) && Path.GetExtension(env).Length > 0
-                ? env
-                : Path.Combine(env, LibraryFile));
+            try
+            {
+                candidates.Add(Path.IsPathRooted(env) && Path.GetExtension(env).Length > 0
+                    ? env
+                    : Path.Combine(env, LibraryFile));
+            }
+            catch (ArgumentException)
+            {
+                // malformed override: ignore it rather than fail the load
+            }
         }
 
-        string rid = System.Runtime.InteropServices.RuntimeInformation.RuntimeIdentifier;
-        string baseDir = AppContext.BaseDirectory;
-        candidates.Add(Path.Combine(baseDir, LibraryFile));
-        candidates.Add(Path.Combine(baseDir, "runtimes", rid, "native", LibraryFile));
+        // Probing is best effort: hosts that have no application directory
+        // (Android returns an empty BaseDirectory) simply contribute nothing
+        // here and are served by the plain-name load in EnsureLoaded.
+        string rid = CurrentRid();
 
-        var dir = new DirectoryInfo(baseDir);
-        for (int i = 0; i < 6 && dir is not null; i++, dir = dir.Parent)
+        // Android: the APK's own native library directory, so a library that is
+        // present but not loadable (missing dependency, wrong ABI) is reported
+        // with the real OS error instead of a bare "not found".
+        if (OperatingSystem.IsAndroid() && AndroidNativeLibraryDir() is { Length: > 0 } apkLibDir)
+            candidates.Add(Path.Combine(apkLibDir, LibraryFile));
+
+        string baseDir = AppContext.BaseDirectory;
+        if (!string.IsNullOrWhiteSpace(baseDir))
         {
-            candidates.Add(Path.Combine(dir.FullName, "native", "runtimes", rid, "native", LibraryFile));
-            candidates.Add(Path.Combine(dir.FullName, "runtimes", rid, "native", LibraryFile));
+            try
+            {
+                candidates.Add(Path.Combine(baseDir, LibraryFile));
+                candidates.Add(Path.Combine(baseDir, "runtimes", rid, "native", LibraryFile));
+
+                var dir = new DirectoryInfo(baseDir);
+                for (int i = 0; i < 6 && dir is not null; i++, dir = dir.Parent)
+                {
+                    candidates.Add(Path.Combine(dir.FullName, "native", "runtimes", rid, "native", LibraryFile));
+                    candidates.Add(Path.Combine(dir.FullName, "runtimes", rid, "native", LibraryFile));
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException
+                                          or IOException or UnauthorizedAccessException
+                                          or System.Security.SecurityException)
+            {
+                // unusable base directory: keep whatever was collected so far
+            }
         }
 
         return candidates.Distinct().ToList();
@@ -344,12 +391,50 @@ internal static class NativeLoader
                    "  (output native\\runtimes\\" + rid + "\\native\\" + LibraryFile +
                    " is discovered automatically).";
         if (OperatingSystem.IsAndroid())
-            return "On Android the library must be packaged into the app as an ABI-specific .so:\n" +
-                   "  build it with the NDK (e.g. cmake --preset android-arm64-release and\n" +
-                   "  cmake --build --preset android-arm64-release -> runtimes/android-arm64/native/),\n" +
-                   "  reference the HCVault.Native package and build with the matching android-*\n" +
-                   "  RuntimeIdentifier so the .so is packaged into the APK, or point\n" +
-                   "  VCNATIVE_HOME at it.";
+        {
+            string abi = AndroidAbi(rid);
+            var sb = new StringBuilder();
+
+            // What the APK actually shipped: the decisive piece of evidence.
+            string? apkLibDir = AndroidNativeLibraryDir();
+            if (apkLibDir is { Length: > 0 })
+            {
+                sb.Append($"The app's native library directory is:\n    {apkLibDir}\n");
+                try
+                {
+                    var names = Directory.EnumerateFiles(apkLibDir, "*.so")
+                                         .Select(Path.GetFileName)
+                                         .OrderBy(n => n, StringComparer.Ordinal)
+                                         .ToList();
+                    sb.Append($"It contains {names.Count} native librar{(names.Count == 1 ? "y" : "ies")}");
+                    sb.Append(names.Any(n => n is not null && n.Contains("hcvault", StringComparison.OrdinalIgnoreCase))
+                        ? " including an hcvault one (so the load failed for another reason - see above).\n"
+                        : $" but NOT {LibraryFile}: it was never packaged into the APK.\n");
+                    if (names.Count > 0)
+                        sb.Append($"      {string.Join(", ", names.Take(8))}{(names.Count > 8 ? ", …" : "")}\n");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // listing is a bonus; keep the rest of the hint
+                }
+                sb.Append('\n');
+            }
+
+            return sb.ToString() +
+                   $"On Android the library is loaded from inside the APK (lib/{abi}/{LibraryFile}).\n" +
+                   $"No such entry exists for this process ({rid} = {abi}), which almost always\n" +
+                   "means the APK was built without this ABI. Emulators are usually x86_64\n" +
+                   "while phones are arm64-v8a, so an APK built for one does not run on the\n" +
+                   "other. Package the missing ABI in one of these ways:\n" +
+                   "  - reference the HCVault.Native package and build with RuntimeIdentifiers\n" +
+                   "    that include it, e.g.\n" +
+                   "      <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>\n" +
+                   "  - or add the .so explicitly in the app project:\n" +
+                   $"      <AndroidNativeLibrary Include=\"...\\runtimes\\{rid}\\native\\{LibraryFile}\"\n" +
+                   $"                            Abi=\"{abi}\" />\n" +
+                   $"    (build it with the NDK: cmake --preset {rid}-release)\n" +
+                   "  Verify what actually shipped:  unzip -l <app>.apk | grep hcvault-core";
+        }
         return "No hcvault-core library was found. Build it from the source distribution\n" +
                "first (or run ./build.sh from the repository root, which does this):\n" +
                "    cd native && cmake --preset linux-release && cmake --build --preset linux-release\n" +
@@ -363,27 +448,109 @@ internal static class NativeLoader
     private static List<string> FindOtherBuiltRids(string currentRid)
     {
         var rids = new List<string>();
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        for (int i = 0; i < 7 && dir is not null; i++, dir = dir.Parent)
+        string baseDir = AppContext.BaseDirectory;
+        if (string.IsNullOrWhiteSpace(baseDir))
+            return rids;
+
+        try
         {
-            string runtimesDir = Path.Combine(dir.FullName, "native", "runtimes");
-            if (!Directory.Exists(runtimesDir))
-                continue;
-            foreach (string ridDir in Directory.EnumerateDirectories(runtimesDir))
+            var dir = new DirectoryInfo(baseDir);
+            for (int i = 0; i < 7 && dir is not null; i++, dir = dir.Parent)
             {
-                string name = Path.GetFileName(ridDir);
-                if (name != currentRid
-                    && File.Exists(Path.Combine(ridDir, "native", LibraryFile))
-                    && !rids.Contains(name))
+                string runtimesDir = Path.Combine(dir.FullName, "native", "runtimes");
+                if (!Directory.Exists(runtimesDir))
+                    continue;
+                foreach (string ridDir in Directory.EnumerateDirectories(runtimesDir))
                 {
-                    rids.Add(name);
+                    string name = Path.GetFileName(ridDir);
+                    if (name != currentRid
+                        && File.Exists(Path.Combine(ridDir, "native", LibraryFile))
+                        && !rids.Contains(name))
+                    {
+                        rids.Add(name);
+                    }
                 }
             }
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException
+                                      or IOException or UnauthorizedAccessException
+                                      or System.Security.SecurityException)
+        {
+            // diagnostics only — never throw while building an error message
         }
         return rids;
     }
 
+    /// <summary>
+    ///   The runtime identifier of this process. <see cref="RuntimeInformation.RuntimeIdentifier"/>
+    ///   is not always published by the host — .NET for Android reports
+    ///   <c>"unknown"</c> — so fall back to the OS plus the process architecture.
+    /// </summary>
+    private static string CurrentRid()
+    {
+        string rid = RuntimeInformation.RuntimeIdentifier;
+        if (!string.IsNullOrWhiteSpace(rid) && rid != "unknown" && rid.Contains('-'))
+            return rid;
+
+        string os = OperatingSystem.IsAndroid() ? "android"
+                  : OperatingSystem.IsWindows() ? "win"
+                  : OperatingSystem.IsMacOS() ? "osx"
+                  : OperatingSystem.IsIOS() ? "ios"
+                  : "linux";
+        string arch = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => "x64",
+            Architecture.X86 => "x86",
+            Architecture.Arm64 => "arm64",
+            Architecture.Arm => "arm",
+            var other => other.ToString().ToLowerInvariant(),
+        };
+        return $"{os}-{arch}";
+    }
+
+    /// <summary>
+    ///   The directory the APK's native libraries were installed to
+    ///   (<c>.../lib/{abi}/</c>). Android does not expose it through AppContext,
+    ///   but every running .NET app has its own runtime libraries mapped from
+    ///   exactly that directory.
+    /// </summary>
+    private static string? AndroidNativeLibraryDir()
+    {
+        try
+        {
+            foreach (string line in File.ReadLines("/proc/self/maps"))
+            {
+                int idx = line.IndexOf('/');
+                if (idx < 0)
+                    continue;
+                string path = line[idx..].Trim();
+                if (path.EndsWith("/libmonodroid.so", StringComparison.Ordinal)
+                    || path.EndsWith("/libmonosgen-2.0.so", StringComparison.Ordinal)
+                    || path.EndsWith("/libSystem.Native.so", StringComparison.Ordinal)
+                    || path.EndsWith("/libnet-android.release.so", StringComparison.Ordinal))
+                {
+                    return Path.GetDirectoryName(path);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // diagnostics only
+        }
+        return null;
+    }
+
     private static string RidArch(string rid) => rid.StartsWith("win-") ? rid[4..] : rid;
+
+    /// <summary>Android ABI directory name (lib/{abi}/ inside the APK) for a .NET RID.</summary>
+    private static string AndroidAbi(string rid) => rid switch
+    {
+        "android-arm64" => "arm64-v8a",
+        "android-arm" => "armeabi-v7a",
+        "android-x64" => "x86_64",
+        "android-x86" => "x86",
+        _ => rid,
+    };
 
     /// <summary>
     ///   Reads a file's PE or ELF header and describes its actual architecture,
