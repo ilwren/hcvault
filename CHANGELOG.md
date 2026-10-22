@@ -4,40 +4,6 @@ All notable changes to this project are documented here. The format is
 based on [Keep a Changelog](https://keepachangelog.com/) and the project
 follows semantic versioning.
 
-## Unreleased
-
-- **Fixed: the first volume creation made the process look ~300 MB heavier.**
-  `vc_init` (reached from the first `Volume.Create`) started the encryption
-  thread pool with one worker per logical CPU and an 8 MiB stack each, so a
-  32-CPU machine reserved 256 MiB the moment the library initialised - and it
-  stayed reserved for the life of the process. The pool now uses 512 KiB
-  stacks and is capped at 8 workers (auto-detect probing has at most 6
-  candidates, and 8 workers already saturate sector I/O). On the same 32-CPU
-  measurement the pool start went from 256 MiB to 4 MiB; on a 2-CPU host from
-  16 MiB to 1 MiB. The `POSIX` thread start also sets the stack size
-  unconditionally - the old "raise if smaller" check never fired against
-  glibc's 8 MiB default, which is why the minimum was an exact size in
-  practice. Windows `CreateThread` keeps the value as the reserve size.
-  Note for readers of `Process.PrivateMemorySize64`: on Linux and Android that
-  property is `/proc/self/status`'s `VmData`, i.e. *reserved* private address
-  space, so thread stacks show up there in full even though RSS barely moves.
-
-- **Fixed: every `Create()` leaked one worker thread's stack.**
-  `VolumeCreator::CreateVolume` started its worker as a local `Thread` that
-  went out of scope without `Join()` or `Detach()`. A joinable POSIX thread
-  keeps its stack mapped after it exits, so each create added 8 MiB of VmData
-  (and a leaked handle per thread on Windows) for good. The creator now owns
-  the thread and joins it in `CheckResult()` (and in its destructor as a
-  safety net); `Thread` additionally reaps abandoned threads in its
-  destructor, releases the Win32 handle in `Join()`, and tolerates repeated
-  join/detach. Ten create/open/write cycles now hold at 2.4 MB of VmData
-  instead of growing by 8 MB each.
-
-- **Fixed: the native test suite did not compile against the current ABI.**
-  `native/tests/vcapi_tests.c` still called `vc_open_volume` with the
-  pre-`kdf_name` signature. All calls pass the kdf now (NULL = auto-detect,
-  which also exercises the parallel probing path).
-
 ## 1.6.4 — 2026-10-21
 
 - **Fixed: the native loader crashed on Android instead of loading the
@@ -118,6 +84,60 @@ follows semantic versioning.
   so the probe pays for every other KDF before reaching it). The re-open
   now reuses the KDF the volume was created with - noticeably faster and,
   on memory-constrained hosts, one large allocation instead of two.
+
+- **Fixed: the first volume creation made the process look ~300 MB heavier.**
+  `vc_init` (reached from the first `Volume.Create`) started the encryption
+  thread pool with one worker per logical CPU and an 8 MiB stack each, so a
+  32-CPU machine reserved 256 MiB the moment the library initialised - and it
+  stayed reserved for the life of the process. The pool now uses 512 KiB
+  stacks and is capped at 8 workers (auto-detect probing has at most 6
+  candidates, and 8 workers already saturate sector I/O). On the same 32-CPU
+  measurement the pool start went from 256 MiB to 4 MiB; on a 2-CPU host from
+  16 MiB to 1 MiB. The `POSIX` thread start also sets the stack size
+  unconditionally - the old "raise if smaller" check never fired against
+  glibc's 8 MiB default, which is why the minimum was an exact size in
+  practice. Windows `CreateThread` keeps the value as the reserve size.
+  Note for readers of `Process.PrivateMemorySize64`: on Linux and Android that
+  property is `/proc/self/status`'s `VmData`, i.e. *reserved* private address
+  space, so thread stacks show up there in full even though RSS barely moves.
+
+- **Fixed: every `Create()` leaked one worker thread's stack.**
+  `VolumeCreator::CreateVolume` started its worker as a local `Thread` that
+  went out of scope without `Join()` or `Detach()`. A joinable POSIX thread
+  keeps its stack mapped after it exits, so each create added 8 MiB of VmData
+  (and a leaked handle per thread on Windows) for good. The creator now owns
+  the thread and joins it in `CheckResult()` (and in its destructor as a
+  safety net); `Thread` additionally reaps abandoned threads in its
+  destructor, releases the Win32 handle in `Join()`, and tolerates repeated
+  join/detach. Ten create/open/write cycles now hold at 2.4 MB of VmData
+  instead of growing by 8 MB each.
+
+- **Fixed: the native test suite did not compile against the current ABI.**
+  `native/tests/vcapi_tests.c` still called `vc_open_volume` with the
+  pre-`kdf_name` signature. All calls pass the kdf now (NULL = auto-detect,
+  which also exercises the parallel probing path).
+
+- **Fixed: the 1.6.4 release never shipped.** The release job listed the two
+  best-effort macOS jobs (`python-wheel-macos`, `avalonia-macos`) in `needs`.
+  When GitHub cannot hand out a hosted arm64 macOS runner it cancels the job
+  (`The job was not acquired by Runner of type hosted ...`) instead of
+  failing it, and a cancelled dependency skips the dependent job **even
+  though the macOS jobs are `continue-on-error: true`**. The 1.6.4 run
+  therefore built every required asset - linux/windows wheels, both NuGet
+  packages, the APKs, the linux and windows demos - and then skipped the
+  release, leaving 1.6.4 unpublished. The release job now runs on
+  `always()` and checks the *required* jobs explicitly, so a real failure
+  still blocks it while an unavailable macOS runner only costs the optional
+  macOS assets (the collector already tolerated their absence).
+
+- **Fixed: macOS wheels carried the build host's OS version in their tag.**
+  The platform tag came from `sysconfig.get_platform()`, which reports the
+  runner image (`macosx_26_0_arm64` for the 1.6.3 wheel) - so the wheel
+  could only be installed on that macOS version or newer, never on the
+  macOS 11/12/13/14 machines it actually supports. The tag is now built
+  from `MACOSX_DEPLOYMENT_TARGET` (default 11.0, the first arm64 macOS) and
+  the RID, and the release job exports the same value for the CMake build so
+  the dylib and the tag agree: `hcvault-1.6.4-py3-none-macosx_11_0_arm64.whl`.
 
 ## 1.6.3 — 2026-10-16
 
