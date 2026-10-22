@@ -282,6 +282,10 @@ namespace VeraCrypt
 			thread.Join();
 		}
 
+		// Drop the joined threads so a later Start()/Stop() cycle cannot
+		// re-join them (pthread_join on an already-joined thread is an error).
+		RunningThreads.clear();
+
 		ThreadCount = 0;
 		ThreadPoolRunning = false;
 	}

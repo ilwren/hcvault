@@ -14,6 +14,7 @@
 #define TC_HEADER_Volume_VolumeCreator
 
 #include "Platform/Platform.h"
+#include "Platform/Thread.h"
 #include "Volume/Volume.h"
 #include "RandomNumberGenerator.h"
 #if defined (TC_LINUX)
@@ -188,6 +189,7 @@ namespace VeraCrypt
 
 	protected:
 		void CreationThread ();
+		void JoinCreationThread ();
 
 		volatile bool AbortRequested;
 		volatile bool CreationInProgress;
@@ -203,6 +205,13 @@ namespace VeraCrypt
 		SharedVal <int> Stage;
 		uint64 WriteOffset;
 		ProgressInfo mProgressInfo;
+
+		// The creation worker used to be a local Thread dropped on the floor
+		// after Start(): nobody ever joined or detached it, so every create
+		// leaked a full worker stack (512 KiB now, 8 MiB before) - a joinable
+		// POSIX thread keeps its stack mapped until it is joined or detached.
+		Thread CreationWorker;
+		bool CreationWorkerStarted;
 
 		SecureBuffer HeaderKey;
 		shared_ptr <VolumePassword> PasswordKey;
