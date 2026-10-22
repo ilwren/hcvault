@@ -21,10 +21,14 @@
 #endif
 #include "EncryptionTest.h"
 #include "Pkcs5Kdf.h"
+#include <mutex>
 #include "VolumeHeader.h"
 
 namespace VeraCrypt
 {
+	using std::call_once;
+	using std::once_flag;
+
 #if !defined (WOLFCRYPT_BACKEND) && !defined (VC_DCS_DISABLE_ARGON2)
 	class FailingArgon2Kdf : public Pkcs5Kdf
 	{
@@ -524,6 +528,143 @@ namespace VeraCrypt
 			if (memcmp (XtsTestVectors[i].ciphertext, p, sizeof (p)) != 0)
 				throw TestFailed (SRC_POS);
 		}
+	}
+
+	void EncryptionTest::TestArgon2 ()
+	{
+	#if !defined (WOLFCRYPT_BACKEND) && !defined (VC_DCS_DISABLE_ARGON2)
+		VolumePassword password ((uint8*) "password", 8);
+		static const uint8 saltData[] = { 0x12, 0x34, 0x56, 0x78 };
+		ConstBufferPtr salt (saltData, sizeof (saltData));
+		Buffer derivedKey (4);
+
+		Pkcs5Argon2 pkcs5Argon2;
+		static const uint8 argon2SaltData[] = { 's', 'o', 'm', 'e', 's', 'a', 'l', 't' };
+		static const uint8 argon2Pim1DerivedKey[] =
+		{
+			0x9e, 0x87, 0x89, 0xc8, 0xb4, 0x28, 0x34, 0x22,
+			0x0a, 0xfc, 0x00, 0x08, 0x5a, 0xc7, 0x3a, 0xcc,
+			0x30, 0x86, 0x51, 0x21, 0x69, 0x94, 0xab, 0xbf,
+			0xdd, 0xd6, 0x9b, 0x25, 0x92, 0x03, 0x2e, 0xfd
+		};
+		static const uint8 argon2Pim1HeaderKeyPrefix[] =
+		{
+			0x48, 0x8d, 0x71, 0xbd, 0x71, 0x6e, 0x68, 0x45,
+			0xaa, 0xe6, 0xe2, 0x29, 0x74, 0x18, 0x2c, 0x20,
+			0xe9, 0x42, 0x8d, 0x7b, 0x3d, 0x4b, 0xcf, 0x54,
+			0x04, 0x6c, 0x3e, 0xbe, 0x80, 0x33, 0x8f, 0x20
+		};
+		ConstBufferPtr argon2Salt (argon2SaltData, sizeof (argon2SaltData));
+		Buffer argon2DerivedKey (sizeof (argon2Pim1DerivedKey));
+		Buffer argon2HeaderKey (ARGON2_HEADER_KEYDATA_SIZE);
+
+		// PIM 1 maps to Argon2id t=3, m=64 MiB, p=1.
+		if (pkcs5Argon2.DeriveKey (argon2DerivedKey, password, 1, argon2Salt) != 0)
+			throw TestFailed (SRC_POS);
+		if (memcmp (argon2DerivedKey.Ptr(), argon2Pim1DerivedKey, sizeof (argon2Pim1DerivedKey)) != 0)
+			throw TestFailed (SRC_POS);
+		if (pkcs5Argon2.DeriveKey (argon2HeaderKey, password, 1, argon2Salt) != 0)
+			throw TestFailed (SRC_POS);
+		if (memcmp (argon2HeaderKey.Ptr(), argon2Pim1HeaderKeyPrefix, sizeof (argon2Pim1HeaderKeyPrefix)) != 0)
+			throw TestFailed (SRC_POS);
+
+		try
+		{
+			if (pkcs5Argon2.DeriveKey (derivedKey, password, salt, 5) != 0)
+				throw TestFailed (SRC_POS);
+			throw TestFailed (SRC_POS);
+		}
+		catch (ParameterIncorrect&)
+		{
+		}
+
+		shared_ptr <Pkcs5Kdf> sha512Kdf (new Pkcs5HmacSha512);
+		shared_ptr <Pkcs5Kdf> failingArgon2Kdf (new FailingArgon2Kdf);
+		shared_ptr <EncryptionAlgorithm> ea (new AES);
+		SecureBuffer headerBuffer (TC_VOLUME_HEADER_SIZE);
+		SecureBuffer dataKey (ea->GetKeySize() * 2);
+		SecureBuffer headerSalt (VolumeHeader::GetSaltSize());
+		SecureBuffer headerKey (VolumeHeader::GetLargestSerializedKeySize());
+
+		for (size_t i = 0; i < dataKey.Size(); ++i)
+			dataKey.Ptr()[i] = (uint8) (i + 1);
+
+		for (size_t i = 0; i < headerSalt.Size(); ++i)
+			headerSalt.Ptr()[i] = (uint8) (i + 2);
+
+		if (sha512Kdf->DeriveKey (headerKey, password, 1, headerSalt) != 0)
+			throw TestFailed (SRC_POS);
+
+		VolumeHeaderCreationOptions options;
+		options.DataKey = dataKey;
+		options.EA = ea;
+		options.Kdf = sha512Kdf;
+		options.HeaderKey = headerKey;
+		options.Salt = headerSalt;
+		options.SectorSize = TC_SECTOR_SIZE_FILE_HOSTED_VOLUME;
+		options.VolumeDataStart = TC_VOLUME_HEADER_GROUP_SIZE;
+		options.VolumeDataSize = TC_MIN_VOLUME_SIZE;
+		options.Type = VolumeType::Normal;
+
+		VolumeHeader header (TC_VOLUME_HEADER_SIZE);
+		header.Create (headerBuffer, options);
+
+		Pkcs5KdfList kdfs;
+		kdfs.push_back (failingArgon2Kdf);
+		kdfs.push_back (sha512Kdf);
+
+		EncryptionAlgorithmList encryptionAlgorithms;
+		encryptionAlgorithms.push_back (shared_ptr <EncryptionAlgorithm> (new AES));
+
+		EncryptionModeList encryptionModes;
+		encryptionModes.push_back (shared_ptr <EncryptionMode> (new EncryptionModeXTS));
+
+		VolumeHeader decryptedHeader (TC_VOLUME_HEADER_SIZE);
+		if (!decryptedHeader.Decrypt (headerBuffer, password, 1, shared_ptr <Pkcs5Kdf> (), kdfs, encryptionAlgorithms, encryptionModes)
+			|| decryptedHeader.GetPkcs5Kdf()->GetName() != sha512Kdf->GetName())
+		{
+			throw TestFailed (SRC_POS);
+		}
+
+		try
+		{
+			decryptedHeader.Decrypt (headerBuffer, password, 1, failingArgon2Kdf, kdfs, encryptionAlgorithms, encryptionModes);
+			throw TestFailed (SRC_POS);
+		}
+		catch (ExternalException&)
+		{
+		}
+	#endif
+	}
+
+	static once_flag Argon2TestOnce;
+	static thread_local bool Argon2SelfTestRunning = false;
+
+	void EncryptionTest::EnsureArgon2Tested ()
+	{
+	#if !defined (WOLFCRYPT_BACKEND) && !defined (VC_DCS_DISABLE_ARGON2)
+		// TestArgon2() derives keys itself, which re-enters this function on
+		// the same thread. call_once is not reentrant, so bypass it there.
+		if (Argon2SelfTestRunning)
+			return;
+
+		call_once (Argon2TestOnce, []
+		{
+			Argon2SelfTestRunning = true;
+			try
+			{
+				TestArgon2();
+			}
+			catch (...)
+			{
+				// Leave the once_flag unsatisfied so the next caller retries
+				// and fails loudly again rather than silently trusting Argon2.
+				Argon2SelfTestRunning = false;
+				throw;
+			}
+			Argon2SelfTestRunning = false;
+		});
+	#endif
 	}
 
 	void EncryptionTest::TestXts ()
@@ -1200,104 +1341,6 @@ namespace VeraCrypt
 		if (memcmp (derivedKey.Ptr(), "\xd0\x53\xa2\x30", 4) != 0)
 			throw TestFailed (SRC_POS);
 
-	#ifndef VC_DCS_DISABLE_ARGON2
-		Pkcs5Argon2 pkcs5Argon2;
-		static const uint8 argon2SaltData[] = { 's', 'o', 'm', 'e', 's', 'a', 'l', 't' };
-		static const uint8 argon2Pim1DerivedKey[] =
-		{
-			0x9e, 0x87, 0x89, 0xc8, 0xb4, 0x28, 0x34, 0x22,
-			0x0a, 0xfc, 0x00, 0x08, 0x5a, 0xc7, 0x3a, 0xcc,
-			0x30, 0x86, 0x51, 0x21, 0x69, 0x94, 0xab, 0xbf,
-			0xdd, 0xd6, 0x9b, 0x25, 0x92, 0x03, 0x2e, 0xfd
-		};
-		static const uint8 argon2Pim1HeaderKeyPrefix[] =
-		{
-			0x48, 0x8d, 0x71, 0xbd, 0x71, 0x6e, 0x68, 0x45,
-			0xaa, 0xe6, 0xe2, 0x29, 0x74, 0x18, 0x2c, 0x20,
-			0xe9, 0x42, 0x8d, 0x7b, 0x3d, 0x4b, 0xcf, 0x54,
-			0x04, 0x6c, 0x3e, 0xbe, 0x80, 0x33, 0x8f, 0x20
-		};
-		ConstBufferPtr argon2Salt (argon2SaltData, sizeof (argon2SaltData));
-		Buffer argon2DerivedKey (sizeof (argon2Pim1DerivedKey));
-		Buffer argon2HeaderKey (ARGON2_HEADER_KEYDATA_SIZE);
-
-		// PIM 1 maps to Argon2id t=3, m=64 MiB, p=1.
-		if (pkcs5Argon2.DeriveKey (argon2DerivedKey, password, 1, argon2Salt) != 0)
-			throw TestFailed (SRC_POS);
-		if (memcmp (argon2DerivedKey.Ptr(), argon2Pim1DerivedKey, sizeof (argon2Pim1DerivedKey)) != 0)
-			throw TestFailed (SRC_POS);
-		if (pkcs5Argon2.DeriveKey (argon2HeaderKey, password, 1, argon2Salt) != 0)
-			throw TestFailed (SRC_POS);
-		if (memcmp (argon2HeaderKey.Ptr(), argon2Pim1HeaderKeyPrefix, sizeof (argon2Pim1HeaderKeyPrefix)) != 0)
-			throw TestFailed (SRC_POS);
-
-		try
-		{
-			if (pkcs5Argon2.DeriveKey (derivedKey, password, salt, 5) != 0)
-				throw TestFailed (SRC_POS);
-			throw TestFailed (SRC_POS);
-		}
-		catch (ParameterIncorrect&)
-		{
-		}
-
-		shared_ptr <Pkcs5Kdf> sha512Kdf (new Pkcs5HmacSha512);
-		shared_ptr <Pkcs5Kdf> failingArgon2Kdf (new FailingArgon2Kdf);
-		shared_ptr <EncryptionAlgorithm> ea (new AES);
-		SecureBuffer headerBuffer (TC_VOLUME_HEADER_SIZE);
-		SecureBuffer dataKey (ea->GetKeySize() * 2);
-		SecureBuffer headerSalt (VolumeHeader::GetSaltSize());
-		SecureBuffer headerKey (VolumeHeader::GetLargestSerializedKeySize());
-
-		for (size_t i = 0; i < dataKey.Size(); ++i)
-			dataKey.Ptr()[i] = (uint8) (i + 1);
-
-		for (size_t i = 0; i < headerSalt.Size(); ++i)
-			headerSalt.Ptr()[i] = (uint8) (i + 2);
-
-		if (sha512Kdf->DeriveKey (headerKey, password, 1, headerSalt) != 0)
-			throw TestFailed (SRC_POS);
-
-		VolumeHeaderCreationOptions options;
-		options.DataKey = dataKey;
-		options.EA = ea;
-		options.Kdf = sha512Kdf;
-		options.HeaderKey = headerKey;
-		options.Salt = headerSalt;
-		options.SectorSize = TC_SECTOR_SIZE_FILE_HOSTED_VOLUME;
-		options.VolumeDataStart = TC_VOLUME_HEADER_GROUP_SIZE;
-		options.VolumeDataSize = TC_MIN_VOLUME_SIZE;
-		options.Type = VolumeType::Normal;
-
-		VolumeHeader header (TC_VOLUME_HEADER_SIZE);
-		header.Create (headerBuffer, options);
-
-		Pkcs5KdfList kdfs;
-		kdfs.push_back (failingArgon2Kdf);
-		kdfs.push_back (sha512Kdf);
-
-		EncryptionAlgorithmList encryptionAlgorithms;
-		encryptionAlgorithms.push_back (shared_ptr <EncryptionAlgorithm> (new AES));
-
-		EncryptionModeList encryptionModes;
-		encryptionModes.push_back (shared_ptr <EncryptionMode> (new EncryptionModeXTS));
-
-		VolumeHeader decryptedHeader (TC_VOLUME_HEADER_SIZE);
-		if (!decryptedHeader.Decrypt (headerBuffer, password, 1, shared_ptr <Pkcs5Kdf> (), kdfs, encryptionAlgorithms, encryptionModes)
-			|| decryptedHeader.GetPkcs5Kdf()->GetName() != sha512Kdf->GetName())
-		{
-			throw TestFailed (SRC_POS);
-		}
-
-		try
-		{
-			decryptedHeader.Decrypt (headerBuffer, password, 1, failingArgon2Kdf, kdfs, encryptionAlgorithms, encryptionModes);
-			throw TestFailed (SRC_POS);
-		}
-		catch (ExternalException&)
-		{
-		}
-	#endif
          #else
                Pkcs5HmacSha256 pkcs5HmacSha256;
 		if (pkcs5HmacSha256.DeriveKey (derivedKey, password, salt, 5) != 0)

@@ -111,72 +111,31 @@ namespace VeraCrypt
 
 		if (!kdf && EncryptionThreadPool::IsRunning() && keyDerivationFunctions.size() > 1)
 		{
-			typedef EncryptionThreadPool::KeyDerivationWorkItem KeyDerivationWorkItem;
-
-			list < shared_ptr <KeyDerivationWorkItem> > keyDerivationWorkItems;
-			SharedVal <size_t> outstandingWorkItemCount (0);
-			SyncEvent keyDerivationCompletedEvent;
-			SyncEvent noOutstandingWorkItemEvent;
-			long volatile abortKeyDerivation = 0;
-			size_t enqueuedWorkItemCount = 0;
-			size_t processedWorkItemCount = 0;
-			bool workItemsDrained = false;
-
-			try
+			// Auto-detect probes candidate KDFs in parallel. Argon2 reserves its
+			// whole working matrix (416 MiB at the default PIM, up to 1 GiB) for
+			// the duration of the derivation, so probing it next to the cheap HMAC
+			// candidates makes the peak of every *failed* unlock the sum of both -
+			// and Volume::Open repeats the probe once per layout. Probe in two
+			// rounds instead: memory-light KDFs first, memory-hard ones only if
+			// none of them matched. Identical candidate set, identical outcome,
+			// different order - a correct password on an HMAC volume and every
+			// wrong password now avoid the large allocation completely.
+			Pkcs5KdfList light, heavy;
+			foreach (shared_ptr <Pkcs5Kdf> pkcs5, keyDerivationFunctions)
 			{
-				foreach (shared_ptr <Pkcs5Kdf> pkcs5, keyDerivationFunctions)
-				{
-					shared_ptr <KeyDerivationWorkItem> keyDerivationWorkItem (new KeyDerivationWorkItem (pkcs5, GetHeaderKeyDerivationSize (pkcs5)));
-					keyDerivationWorkItems.push_back (keyDerivationWorkItem);
-					EncryptionThreadPool::BeginKeyDerivation (*keyDerivationWorkItem, password, pim, salt, keyDerivationCompletedEvent, noOutstandingWorkItemEvent, outstandingWorkItemCount, &abortKeyDerivation);
-					++enqueuedWorkItemCount;
-				}
-
-				while (processedWorkItemCount < keyDerivationWorkItems.size())
-				{
-					bool processed = false;
-
-					foreach (shared_ptr <KeyDerivationWorkItem> keyDerivationWorkItem, keyDerivationWorkItems)
-					{
-						if (!keyDerivationWorkItem->Processed && keyDerivationWorkItem->Completed.Get())
-						{
-							keyDerivationWorkItem->Processed = true;
-							++processedWorkItemCount;
-							processed = true;
-
-							if (keyDerivationWorkItem->ItemException.get())
-							{
-								// KDF exceptions are fatal setup/runtime errors; candidate failures are reported via Result.
-								abortKeyDerivation = 1;
-								DrainKeyDerivationWorkItems (noOutstandingWorkItemEvent, enqueuedWorkItemCount, workItemsDrained);
-								keyDerivationWorkItem->ItemException->Throw();
-							}
-
-							if (keyDerivationWorkItem->Result != 0)
-								continue;
-
-							if (DecryptWithHeaderKey (encryptedData, keyDerivationWorkItem->Kdf, keyDerivationWorkItem->DerivedKey, encryptionAlgorithms, encryptionModes))
-							{
-								abortKeyDerivation = 1;
-								DrainKeyDerivationWorkItems (noOutstandingWorkItemEvent, enqueuedWorkItemCount, workItemsDrained);
-								return true;
-							}
-						}
-					}
-
-					if (processedWorkItemCount < keyDerivationWorkItems.size() && !processed)
-						keyDerivationCompletedEvent.Wait();
-				}
-			}
-			catch (...)
-			{
-				abortKeyDerivation = 1;
-				DrainKeyDerivationWorkItems (noOutstandingWorkItemEvent, enqueuedWorkItemCount, workItemsDrained);
-				throw;
+				if (pkcs5->IsArgon2())
+					heavy.push_back (pkcs5);
+				else
+					light.push_back (pkcs5);
 			}
 
-			DrainKeyDerivationWorkItems (noOutstandingWorkItemEvent, enqueuedWorkItemCount, workItemsDrained);
-			return false;
+			if (light.empty() || heavy.empty())
+				return DecryptParallel (encryptedData, password, pim, salt, keyDerivationFunctions, encryptionAlgorithms, encryptionModes);
+
+			if (DecryptParallel (encryptedData, password, pim, salt, light, encryptionAlgorithms, encryptionModes))
+				return true;
+
+			return DecryptParallel (encryptedData, password, pim, salt, heavy, encryptionAlgorithms, encryptionModes);
 		}
 
 		foreach (shared_ptr <Pkcs5Kdf> pkcs5, keyDerivationFunctions)
@@ -198,6 +157,76 @@ namespace VeraCrypt
 				return true;
 		}
 
+		return false;
+	}
+
+	bool VolumeHeader::DecryptParallel (const ConstBufferPtr &encryptedData, const VolumePassword &password, int pim, const ConstBufferPtr &salt, const Pkcs5KdfList &keyDerivationFunctions, const EncryptionAlgorithmList &encryptionAlgorithms, const EncryptionModeList &encryptionModes)
+	{
+		typedef EncryptionThreadPool::KeyDerivationWorkItem KeyDerivationWorkItem;
+
+		list < shared_ptr <KeyDerivationWorkItem> > keyDerivationWorkItems;
+		SharedVal <size_t> outstandingWorkItemCount (0);
+		SyncEvent keyDerivationCompletedEvent;
+		SyncEvent noOutstandingWorkItemEvent;
+		long volatile abortKeyDerivation = 0;
+		size_t enqueuedWorkItemCount = 0;
+		size_t processedWorkItemCount = 0;
+		bool workItemsDrained = false;
+
+		try
+		{
+			foreach (shared_ptr <Pkcs5Kdf> pkcs5, keyDerivationFunctions)
+			{
+				shared_ptr <KeyDerivationWorkItem> keyDerivationWorkItem (new KeyDerivationWorkItem (pkcs5, GetHeaderKeyDerivationSize (pkcs5)));
+				keyDerivationWorkItems.push_back (keyDerivationWorkItem);
+				EncryptionThreadPool::BeginKeyDerivation (*keyDerivationWorkItem, password, pim, salt, keyDerivationCompletedEvent, noOutstandingWorkItemEvent, outstandingWorkItemCount, &abortKeyDerivation);
+				++enqueuedWorkItemCount;
+			}
+
+			while (processedWorkItemCount < keyDerivationWorkItems.size())
+			{
+				bool processed = false;
+
+				foreach (shared_ptr <KeyDerivationWorkItem> keyDerivationWorkItem, keyDerivationWorkItems)
+				{
+					if (!keyDerivationWorkItem->Processed && keyDerivationWorkItem->Completed.Get())
+					{
+						keyDerivationWorkItem->Processed = true;
+						++processedWorkItemCount;
+						processed = true;
+
+						if (keyDerivationWorkItem->ItemException.get())
+						{
+							// KDF exceptions are fatal setup/runtime errors; candidate failures are reported via Result.
+							abortKeyDerivation = 1;
+							DrainKeyDerivationWorkItems (noOutstandingWorkItemEvent, enqueuedWorkItemCount, workItemsDrained);
+							keyDerivationWorkItem->ItemException->Throw();
+						}
+
+						if (keyDerivationWorkItem->Result != 0)
+							continue;
+
+						if (DecryptWithHeaderKey (encryptedData, keyDerivationWorkItem->Kdf, keyDerivationWorkItem->DerivedKey, encryptionAlgorithms, encryptionModes))
+						{
+							abortKeyDerivation = 1;
+							DrainKeyDerivationWorkItems (noOutstandingWorkItemEvent, enqueuedWorkItemCount, workItemsDrained);
+							return true;
+						}
+					}
+				}
+
+				if (processedWorkItemCount < keyDerivationWorkItems.size() && !processed)
+					keyDerivationCompletedEvent.Wait();
+			}
+		}
+		catch (...)
+		{
+			abortKeyDerivation = 1;
+			DrainKeyDerivationWorkItems (noOutstandingWorkItemEvent, enqueuedWorkItemCount, workItemsDrained);
+			throw;
+		}
+
+		DrainKeyDerivationWorkItems (noOutstandingWorkItemEvent, enqueuedWorkItemCount, workItemsDrained);
 		return false;
 	}
 

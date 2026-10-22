@@ -392,9 +392,14 @@ int32_t vc_create_volume (const char *path, uint64_t size_bytes,
 
 		if (exfat)
 		{
-			// re-open with the fresh credentials and format the data area
+			// Re-open with the fresh credentials and format the data area.
+			// Pass the KDF the volume was just created with instead of NULL:
+			// auto-detect would re-derive the header key by trying every KDF,
+			// and for Argon2id that is a second 416 MiB / 6-iteration pass
+			// during a single create call (Pkcs5Kdf::GetAvailableAlgorithms
+			// lists Argon2 last, so the probe pays for every other KDF first).
 			shared_ptr<Volume> vol = OpenVolumeInternal (path, password, password_len,
-				keyfile_paths, keyfile_count, pim, false, false, nullptr);
+				keyfile_paths, keyfile_count, pim, false, false, kdf);
 			finally_do_arg (shared_ptr<Volume>, vol, { try { finally_arg->Close(); } catch (...) { } });
 			VeraCryptNet::ExFatFormat (vol);
 		}

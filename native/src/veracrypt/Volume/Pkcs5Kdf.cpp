@@ -11,6 +11,7 @@
 */
 
 #include "Common/Pkcs5.h"
+#include "EncryptionTest.h"
 #include "Platform/StringConverter.h"
 #include "Pkcs5Kdf.h"
 #include "VolumePassword.h"
@@ -192,6 +193,13 @@ namespace VeraCrypt
 
 	int Pkcs5Argon2::DeriveKey (const BufferPtr &key, const VolumePassword &password, int pim, const ConstBufferPtr &salt, long volatile *pAbortKeyDerivation) const
 	{
+		// Argon2's test vectors are verified on first use rather than from
+		// EncryptionTest::TestAll(): the self-test is itself two 64 MiB
+		// derivations, which every process paid at startup even when Argon2
+		// was never used. This runs exactly once per process, before the
+		// first real derivation returns a key.
+		EncryptionTest::EnsureArgon2Tested();
+
 		int iterationCount;
 		int memoryCost;
 		get_argon2_params (pim, &iterationCount, &memoryCost);

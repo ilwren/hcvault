@@ -24,10 +24,21 @@ namespace VeraCrypt
 		static void TestAll ();
 		static void TestAll (bool enableCpuEncryptionSupport);
 
+		//  The Argon2id self-test derives two keys at PIM 1, i.e. two
+		//  64 MiB / 3-iteration passes. Running it eagerly from TestAll()
+		//  cost every process ~64 MiB and several hundred milliseconds at
+		//  startup even when the caller only ever uses HMAC-SHA-512, so it
+		//  is deferred until Argon2 is actually used: Pkcs5Argon2::DeriveKey
+		//  calls EnsureArgon2Tested() before deriving anything. Validation
+		//  is unchanged - no Argon2 key is ever returned to a caller before
+		//  the test vectors have been verified on this machine.
+		static void EnsureArgon2Tested ();
+
 	protected:
 		static void TestCiphers ();
 		static void TestLegacyModes ();
 		static void TestPkcs5 ();
+		static void TestArgon2 ();
 		static void TestXts ();
 		static void TestXtsAES ();
 

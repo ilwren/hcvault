@@ -24,6 +24,67 @@ follows semantic versioning.
   runtime identifier (Android reports `"unknown"`) now derive one from the
   process architecture instead of probing a `runtimes/unknown/` path.
 
+- **`ImportFile` / `ExportFile` and their directory forms are now streamed.**
+  They used to go through `File.ReadAllBytes` / `IVolumeFileSystem.ReadFile`,
+  which materialised the entire file as a single `byte[]`. Importing a 200 MB
+  file pushed the process from 37 MB to 239 MB resident, and a second import
+  added another 200 MB because large-object-heap segments are neither reused
+  promptly nor compacted. Transfers now run through `OpenFile` and a pooled
+  1 MiB buffer that is wiped before it returns to the pool, so peak memory is
+  independent of file size: the same 200 MB import measures 39 MB resident and
+  1 MB of total managed allocation. Signatures are unchanged; `ReadFile` /
+  `WriteFile` still offer whole-file semantics for callers that want them.
+
+- **Automatic KDF detection no longer runs Argon2 next to the cheap candidates.**
+  When no KDF is given, the header is probed against every supported KDF in
+  parallel. Argon2 holds its entire working matrix - 416 MiB at the default
+  PIM, up to 1 GiB - for the whole derivation, so it was inflating the peak of
+  every auto-detected unlock, and `Volume::Open` repeats the probe once per
+  layout. The probe now runs in two rounds: the memory-light KDFs first, the
+  memory-hard ones only if none of them matched. The candidate set and the
+  result are identical. Opening an HMAC volume with the correct password and
+  no explicit KDF drops from 421 MB peak to 5 MB; Argon2 volumes are still
+  found (verified: opened in round two at 69 MB with PIM 1). A wrong password
+  still has to rule Argon2 out, so it still reaches the Argon2 figure - pass
+  an explicit `Kdf` to skip the search entirely.
+
+- **Fixed: non-English file names in a FAT volume were shown as `??????~1`.**
+  The long-name entries were being matched against their 8.3 alias with a
+  checksum computed from the *decoded* alias rather than from its 11 raw
+  on-disk bytes. Windows builds the alias of a non-English name in the OEM
+  code page, so it contains bytes above 0x7F; decoding them as ASCII turned
+  every one into `?`, the checksum no longer matched, and the long name was
+  discarded as an orphan - the listing fell back to the mangled alias. The
+  checksum is now taken from the on-disk bytes as the FAT specification
+  requires, and the 8.3 fallback decodes as Latin-1 so distinct aliases stay
+  distinct. Volumes written by this library were unaffected (it always emits
+  an ASCII alias); volumes written by Windows, VeraCrypt or any other
+  implementation now list correctly.
+
+- **The Argon2 self-test no longer runs at startup.** Initializing the
+  library ran VeraCrypt's full self-test suite, and its Argon2id section
+  derives two keys at PIM 1 - two 64 MiB / 3-iteration passes, repeated for
+  both the hardware-accelerated and the software cipher pass. Every process
+  paid roughly 64 MiB and several hundred milliseconds on the first call
+  into HCVault even when it only ever used HMAC-SHA-512, and on Windows the
+  freed blocks stayed committed, so the cost was visible in Task Manager for
+  the lifetime of the process. The Argon2 vectors are now verified on first
+  use instead: `Pkcs5Argon2::DeriveKey` runs them once per process before it
+  returns any key, so nothing is trusted untested, while callers that never
+  touch Argon2 never pay for it. Measured on linux-x64: initialization drops
+  from ~600 ms / 68 MiB peak RSS to ~15 ms / 3 MiB; the managed test suite
+  runs in 27.7 s instead of 35.3 s.
+
+- **Fixed: creating an exFAT volume derived the header key twice.** After
+  writing the volume, the creator re-opens it to format the data area and
+  asked for KDF auto-detection even though the KDF had just been chosen by
+  the caller, so the header key was derived a second time by trying every
+  algorithm in turn. With Argon2id that is a second 416 MiB / 6-iteration
+  pass inside a single `Volume.Create` call (`Pkcs5Kdf` lists Argon2 last,
+  so the probe pays for every other KDF before reaching it). The re-open
+  now reuses the KDF the volume was created with - noticeably faster and,
+  on memory-constrained hosts, one large allocation instead of two.
+
 ## 1.6.3 — 2026-10-16
 
 - **New: streaming file access.** `IVolumeFileSystem.OpenFile(path,

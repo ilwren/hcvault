@@ -578,7 +578,7 @@ public sealed class FatVolume : IVolumeFileSystem
             // checksum matches the 11 on-disk bytes of the 8.3 entry; otherwise
             // the LFN entries are orphans and the 8.3 alias is displayed.
             string name = shortName;
-            if (lfnBuffer.Length > 0 && FatShortName.Checksum(shortName) == lfnChecksum)
+            if (lfnBuffer.Length > 0 && FatShortName.Checksum(raw.AsSpan(off, 11)) == lfnChecksum)
                 name = lfnBuffer.ToString();
             lfnBuffer.Clear();
             lfnExpected = -1;
@@ -603,10 +603,18 @@ public sealed class FatVolume : IVolumeFileSystem
         return v == 0xFFFF ? '\0' : (char)v;
     }
 
+    // Latin-1 rather than ASCII: the 8.3 alias of a file created by Windows
+    // holds OEM code page bytes, and ASCII collapses every one of them to '?'.
+    // Latin-1 is the only single-byte decode that never loses information, so
+    // distinct aliases stay distinct (short names are compared for uniqueness
+    // and for slot lookup). It is a fallback for display only - whenever a long
+    // name entry is present and its checksum matches, that name wins.
+    private static readonly Encoding ShortNameEncoding = Encoding.Latin1;
+
     private static string DecodeShortName(byte[] raw, int off)
     {
-        var name = Encoding.ASCII.GetString(raw, off, 8).TrimEnd(' ');
-        var ext = Encoding.ASCII.GetString(raw, off + 8, 3).TrimEnd(' ');
+        var name = ShortNameEncoding.GetString(raw, off, 8).TrimEnd(' ');
+        var ext = ShortNameEncoding.GetString(raw, off + 8, 3).TrimEnd(' ');
         return ext.Length > 0 ? $"{name}.{ext}" : name;
     }
 

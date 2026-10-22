@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Text;
 
@@ -86,6 +87,23 @@ internal static class FatShortName
         byte sum = 0;
         foreach (char c in stem + ext)
             sum = (byte)(((sum & 1) << 7) + (sum >> 1) + (byte)c);
+        return sum;
+    }
+
+    /// <summary>
+    ///   The same checksum taken straight from the 11 on-disk DIR_Name bytes.
+    ///   This is the only correct form when reading a volume written by another
+    ///   implementation: Windows builds the 8.3 alias of a non-English file name
+    ///   in the OEM code page, so the alias contains bytes above 0x7F. Decoding
+    ///   those to text first and checksumming the text cannot reproduce them, the
+    ///   long name is then rejected as an orphan, and the mangled alias is shown
+    ///   instead of the real name.
+    /// </summary>
+    public static byte Checksum(ReadOnlySpan<byte> onDiskName11)
+    {
+        byte sum = 0;
+        for (int i = 0; i < 11 && i < onDiskName11.Length; i++)
+            sum = (byte)(((sum & 1) << 7) + (sum >> 1) + onDiskName11[i]);
         return sum;
     }
 

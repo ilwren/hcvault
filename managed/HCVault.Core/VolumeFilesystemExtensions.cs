@@ -1,3 +1,4 @@
+using System.Buffers;
 using HCVault.Core.Fat;
 
 namespace HCVault.Core;
@@ -5,8 +6,10 @@ namespace HCVault.Core;
 /// <summary>
 ///   High-level file transfer between the host filesystem and a mounted
 ///   volume: single files and whole directory trees, in both directions.
-///   Files are transferred whole (the current filesystem API reads and
-///   writes complete files).
+///   Transfers are streamed through a small pooled buffer, so peak memory
+///   stays flat no matter how large the file is. Whole-file semantics remain
+///   available through <see cref="IVolumeFileSystem.ReadFile" /> /
+///   <see cref="IVolumeFileSystem.WriteFile" />.
 /// </summary>
 public static class VolumeFilesystemExtensions
 {
@@ -21,7 +24,10 @@ public static class VolumeFilesystemExtensions
         ArgumentNullException.ThrowIfNull(localPath);
 
         volumePath ??= Path.GetFileName(localPath);
-        fs.WriteFile(volumePath, File.ReadAllBytes(localPath));
+
+        using var source = new FileStream(localPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1);
+        using Stream destination = fs.OpenFile(volumePath, VcFileMode.Create);
+        Copy(source, destination);
     }
 
     /// <summary>Copy a file out of the volume (parent directories are created).</summary>
@@ -31,18 +37,13 @@ public static class VolumeFilesystemExtensions
         ArgumentNullException.ThrowIfNull(volumePath);
         ArgumentNullException.ThrowIfNull(localPath);
 
-        byte[] data = fs.ReadFile(volumePath);
-        try
-        {
-            string? parent = Path.GetDirectoryName(Path.GetFullPath(localPath));
-            if (!string.IsNullOrEmpty(parent))
-                Directory.CreateDirectory(parent);
-            File.WriteAllBytes(localPath, data);
-        }
-        finally
-        {
-            Array.Clear(data);
-        }
+        string? parent = Path.GetDirectoryName(Path.GetFullPath(localPath));
+        if (!string.IsNullOrEmpty(parent))
+            Directory.CreateDirectory(parent);
+
+        using Stream source = fs.OpenFile(volumePath, VcFileMode.Read);
+        using var destination = new FileStream(localPath, FileMode.Create, FileAccess.Write, FileShare.None, 1);
+        Copy(source, destination);
     }
 
     /// <summary>
@@ -113,6 +114,34 @@ public static class VolumeFilesystemExtensions
 
     // ------------------------------------------------------------------ core
 
+    /// <summary>
+    ///   Chunk size for streamed transfers. One MiB keeps the syscall and
+    ///   sector-I/O overhead low while staying far below the 85 KB large-object
+    ///   heap threshold concern - the buffer is pooled, so it is allocated once
+    ///   per process rather than once per file.
+    /// </summary>
+    private const int TransferBufferBytes = 1 << 20;
+
+    /// <summary>
+    ///   Copy one stream into another through a pooled buffer. The buffer is
+    ///   wiped before it goes back to the pool: it held plaintext.
+    /// </summary>
+    private static void Copy(Stream source, Stream destination)
+    {
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(TransferBufferBytes);
+        try
+        {
+            int read;
+            while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                destination.Write(buffer, 0, read);
+        }
+        finally
+        {
+            Array.Clear(buffer);
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     private static void ImportDirectoryRecursive(IVolumeFileSystem fs, string localDir, string volumePath)
     {
         EnsureVolumeDirectory(fs, volumePath);
@@ -121,7 +150,7 @@ public static class VolumeFilesystemExtensions
             ImportDirectoryRecursive(fs, dir, Join(volumePath, Path.GetFileName(dir)));
 
         foreach (string file in Directory.EnumerateFiles(localDir).OrderBy(p => p, StringComparer.Ordinal))
-            fs.WriteFile(Join(volumePath, Path.GetFileName(file)), File.ReadAllBytes(file));
+            fs.ImportFile(file, Join(volumePath, Path.GetFileName(file)));
     }
 
     private static void ExportDirectoryRecursive(IVolumeFileSystem fs, string volumePath, string localDir)
@@ -133,7 +162,7 @@ public static class VolumeFilesystemExtensions
             if (entry.IsDirectory)
                 ExportDirectoryRecursive(fs, Join(volumePath, entry.Name), Path.Combine(localDir, entry.Name));
             else
-                File.WriteAllBytes(Path.Combine(localDir, entry.Name), fs.ReadFile(Join(volumePath, entry.Name)));
+                fs.ExportFile(Join(volumePath, entry.Name), Path.Combine(localDir, entry.Name));
         }
     }
 
