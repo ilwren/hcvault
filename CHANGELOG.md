@@ -130,6 +130,15 @@ follows semantic versioning.
   still blocks it while an unavailable macOS runner only costs the optional
   macOS assets (the collector already tolerated their absence).
 
+- **CI now compiles the Windows port on every pull request.** The Linux job
+  never touches the Win32 code paths (`CreateThread`, the thread-handle
+  lifetime in `Thread::Join`, `File` I/O, CNG RNG), so a change there went
+  unverified until a release build compiled it - which is exactly how the
+  thread-lifecycle changes in this release could have broken Windows
+  silently. A `native-windows` job builds win-x64 with `build.ps1` on
+  push/PR and fails if the DLL is missing or does not export the C API the
+  managed wrapper binds to.
+
 - **Fixed: macOS wheels carried the build host's OS version in their tag.**
   The platform tag came from `sysconfig.get_platform()`, which reports the
   runner image (`macosx_26_0_arm64` for the 1.6.3 wheel) - so the wheel

@@ -123,6 +123,46 @@ jobs:
           name: native-linux-x64
           path: native/runtimes/linux-x64/native/
 
+  native-windows:
+    # Compile gate for the Windows half of the port. The Linux job never
+    # touches it, so a change to the Win32 code paths (CreateThread, the
+    # thread-handle lifetime in Thread::Join, File I/O, CNG RNG) used to be
+    # unverified until a release build. Runs only on push/PR: the release
+    # build already compiles win-x64 (avalonia-windows) and all Windows
+    # architectures (package).
+    name: native library (win-x64, compile gate)
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build native library (win-x64)
+        run: .\build.ps1 -Arch x64 -SkipManaged -NoDownload
+
+      - name: Verify the DLL and its C API exports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = 'native/runtimes/win-x64/native/hcvault-core.dll'
+          if (-not (Test-Path $dll)) { throw "missing $dll" }
+          $fi = Get-Item $dll
+          Write-Host ("{0}: {1:N0} bytes" -f $fi.Name, $fi.Length)
+          if ($fi.Length -lt 100KB) { throw "suspiciously small native library ($($fi.Length) bytes)" }
+
+          # the API surface the managed wrapper binds to must be exported;
+          # a missing VC_API/visibility macro shows up here, not at runtime
+          $bytes = [System.IO.File]::ReadAllBytes($fi.FullName)
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          $required = @(
+            'vc_init', 'vc_shutdown', 'vc_create_volume', 'vc_open_volume',
+            'vc_close_volume', 'vc_read_sectors', 'vc_write_sectors',
+            'vc_change_password', 'vc_exfat_mount', 'vc_exfat_unmount'
+          )
+          $missing = @($required | Where-Object { -not $text.Contains($_) })
+          if ($missing.Count -gt 0) { throw "missing exports: $($missing -join ', ')" }
+          Write-Host "exports present: $($required -join ', ')"
+
   aot:
     name: AOT smoke + Avalonia demo (linux-x64)
     runs-on: ubuntu-latest
