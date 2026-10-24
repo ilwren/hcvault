@@ -191,20 +191,32 @@ namespace VeraCrypt
 #endif
 
 	// ---------------------------------------------------------------------------
-	// Thread — 8 MiB stack (VolumeCreator / EncryptionThreadPool requirement)
+	// Thread — 512 KiB worker stacks (see Thread.h: pool workers per CPU add up)
 	// ---------------------------------------------------------------------------
 #ifdef TC_WINDOWS
 
 	void Thread::Join () const
 	{
+		if (Reaped)
+			return;
+
 		if (WaitForSingleObject (SystemHandle, INFINITE) != WAIT_OBJECT_0)
 			throw SystemException (SRC_POS, (int64) GetLastError());
+
+		// Release the handle now that the thread is gone; upstream left it
+		// open forever (one leaked kernel handle per worker).
+		CloseHandle (SystemHandle);
+		Reaped = true;
 	}
 
 	void Thread::Detach () const
 	{
+		if (Reaped)
+			return;
+
 		if (!CloseHandle (SystemHandle))
 			throw SystemException (SRC_POS, (int64) GetLastError());
+		Reaped = true;
 	}
 
 	void Thread::Start (ThreadProcPtr threadProc, void *parameter)
@@ -212,6 +224,8 @@ namespace VeraCrypt
 		SystemHandle = CreateThread (nullptr, MinThreadStackSize, threadProc, parameter, 0, nullptr);
 		if (!SystemHandle)
 			throw SystemException (SRC_POS, (int64) GetLastError());
+		Started = true;
+		Reaped = false;
 	}
 
 	void Thread::Sleep (uint32 milliSeconds)
@@ -243,38 +257,47 @@ namespace VeraCrypt
 
 	void Thread::Join () const
 	{
+		if (Reaped)
+			return;
+
 		int status = pthread_join (SystemHandle, nullptr);
 		if (status != 0)
 			throw SystemException (SRC_POS, status);
+		Reaped = true;
 	}
 
 	void Thread::Detach () const
 	{
+		if (Reaped)
+			return;
+
 		int status = pthread_detach (SystemHandle);
 		if (status != 0)
 			throw SystemException (SRC_POS, status);
+		Reaped = true;
 	}
 
 	void Thread::Start (ThreadProcPtr threadProc, void *parameter)
 	{
 		PthreadAttr attr;
-		size_t stackSize = 0;
 		int status;
 
-		status = pthread_attr_getstacksize (&attr.Attr, &stackSize);
+		// Always set the worker stack size explicitly. The old code only
+		// raised stacks smaller than MinThreadStackSize, which never fired
+		// on glibc (default stack is 8 MiB) - so "8 MiB minimum" silently
+		// meant "8 MiB stacks", and every worker reserved 8 MiB of VmData
+		// that .NET reports as Process.PrivateMemorySize64. Worker threads
+		// here only run iterative crypto/I/O, so MinThreadStackSize is the
+		// size we want in both directions (see Thread.h).
+		status = pthread_attr_setstacksize (&attr.Attr, MinThreadStackSize);
 		if (status != 0)
 			throw SystemException (SRC_POS, status);
-
-		if (stackSize < MinThreadStackSize)
-		{
-			status = pthread_attr_setstacksize (&attr.Attr, MinThreadStackSize);
-			if (status != 0)
-				throw SystemException (SRC_POS, status);
-		}
 
 		status = pthread_create (&SystemHandle, &attr.Attr, threadProc, parameter);
 		if (status != 0)
 			throw SystemException (SRC_POS, status);
+		Started = true;
+		Reaped = false;
 	}
 
 	void Thread::Sleep (uint32 milliSeconds)

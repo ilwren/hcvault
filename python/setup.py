@@ -9,7 +9,9 @@ hcvault/_binaries/<rid>/, and so the wheel gets a correct platform tag:
       Linux: manylinux_<glibc>_<arch>, derived from the symbol versions the
              .so actually requires (probed with objdump; falls back loudly
              if objdump is unavailable)
-      Windows / macOS: the sysconfig platform tag (win_amd64, macosx_..._arm64)
+      Windows: the RID's PEP 425 tag (win_amd64, win32, win_arm64)
+      macOS: macosx_<MACOSX_DEPLOYMENT_TARGET>_<arch> from the RID (never
+             the build host's OS version - see _macos_tag)
   - nothing bundled         -> py3-none-any (the user supplies hcvault-core
                                via VCNATIVE_HOME or the system loader)
 
@@ -23,7 +25,6 @@ import re
 import shutil
 import subprocess
 import sys
-import sysconfig
 from pathlib import Path
 
 from setuptools import setup
@@ -90,6 +91,42 @@ def _rid_and_lib():
     if rid.rsplit("-", 1)[-1] not in _LINUX_ARCH:
         raise SystemExit(f"hcvault: unknown Linux RID: {rid}")
     return rid, "libhcvault-core.so"
+
+
+# first macOS release that runs on Apple silicon; also the floor the CMake
+# build targets when MACOSX_DEPLOYMENT_TARGET is exported (see the wheel job)
+_DEFAULT_MACOS_TARGET = "11.0"
+
+_MACOS_ARCH = {"osx-arm64": "arm64", "osx-x64": "x86_64"}
+
+
+def _macos_tag(rid: str) -> str:
+    """macosx_<deployment target>_<arch> for an osx-* RID.
+
+    The tag must describe the OLDEST macOS the wheel runs on, i.e. the
+    deployment target the dylib was built against - not the machine that
+    happened to build it. Taking it from sysconfig.get_platform() tagged the
+    1.6.3 wheel macosx_26_0_arm64 (the runner image's version), so pip
+    refused to install it on every older - and otherwise supported - macOS.
+    MACOSX_DEPLOYMENT_TARGET is honoured because the release workflow passes
+    the same value to CMake, which keeps the dylib and the tag in agreement.
+    """
+    target = os.environ.get("MACOSX_DEPLOYMENT_TARGET") or _DEFAULT_MACOS_TARGET
+    if not re.fullmatch(r"\d+(\.\d+){0,2}", target):
+        raise SystemExit(
+            f"hcvault: MACOSX_DEPLOYMENT_TARGET={target!r} is not a macOS "
+            "version (expected e.g. 11.0)"
+        )
+    arch = _MACOS_ARCH.get(rid)
+    if arch is None:
+        raise SystemExit(f"hcvault: unknown macOS RID: {rid}")
+    # exactly two components: pip compares this string against the tags it
+    # generates for the running interpreter, which are always major_minor -
+    # a "12.3.1" target would otherwise produce macosx_12_3_1_arm64, a tag
+    # no pip ever offers, i.e. a wheel nobody can install
+    major, _, rest = target.partition(".")
+    minor = rest.split(".")[0] if rest else "0"
+    return f"macosx_{major}_{minor}_{arch}"
 
 
 def _linux_tag(lib: Path, rid: str) -> str:
@@ -176,7 +213,7 @@ class bdist_wheel(_bdist_wheel):
             elif rid.startswith("linux-"):
                 tag[2] = _linux_tag(self.hcvault_bundled_lib, rid)
             else:  # osx-*
-                tag[2] = sysconfig.get_platform().replace("-", "_").replace(".", "_")
+                tag[2] = _macos_tag(rid)
             print(f"hcvault: wheel platform tag: {tag[2]}")
         return tuple(tag)
 

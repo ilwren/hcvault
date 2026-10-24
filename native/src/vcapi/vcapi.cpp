@@ -19,6 +19,7 @@
 
 #include <cstring>
 #include <cstdlib>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -639,9 +640,12 @@ vc_exfat *vc_exfat_mount (vc_volume *volume)
 	try
 	{
 		if (!volume) { SetLastError ("invalid argument"); return nullptr; }
-		vc_exfat *h = new vc_exfat;
+		// Build the mount first: if ExFatMount throws (no drive slot left,
+		// corrupt exFAT, ...) a pre-allocated handle would be leaked, and the
+		// caller cannot free it - it only ever sees nullptr.
+		unique_ptr<vc_exfat> h (new vc_exfat);
 		h->M = VeraCryptNet::ExFatMount (volume->VolumeHandle);
-		return h;
+		return h.release();
 	}
 	catch (const exception &e) { Translate (e); return nullptr; }
 	catch (...) { Translate (); return nullptr; }

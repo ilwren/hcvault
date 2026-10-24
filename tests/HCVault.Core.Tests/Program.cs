@@ -2,6 +2,7 @@ using HCVault.Core;
 using HCVault.Core.Fat;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 // ---------------------------------------------------------------------------
@@ -1116,6 +1117,97 @@ Scenario("in-place format", () =>
         }
         Log("       FAT->exFAT and None->exFAT in-place formats work");
     });
+});
+
+// --------------------------------------------------- handle lifetime safety
+Scenario("dispose safety (mount + password handles)", () =>
+{
+    string g = Path.Combine(root, "dispose");
+    Directory.CreateDirectory(g);
+    string p = Path.Combine(g, "exfat.hc");
+
+    Check(34, "create exFAT volume for the handle tests", () =>
+    {
+        using var pw = SecurePassword.FromText("dispose-pw");
+        Volume.Create(new VolumeCreationOptions
+        {
+            Path = p, SizeBytes = 4 * 1024 * 1024, Password = pw,
+            Filesystem = VcFilesystem.ExFat, Kdf = VcKdf.HmacSha512, Pim = 1, Quick = true,
+        });
+    });
+
+    Check(35, "SecurePassword: double Dispose is safe, disposed password is rejected", () =>
+    {
+        var pw = SecurePassword.FromText("dispose-pw");
+        pw.Dispose();
+        pw.Dispose();                       // idempotent: must not throw
+
+        string scratch = Path.Combine(g, "should-not-exist.hc");
+        try
+        {
+            Volume.Create(new VolumeCreationOptions
+            {
+                Path = scratch, SizeBytes = 2 * 1024 * 1024, Password = pw,
+                Filesystem = VcFilesystem.None, Kdf = VcKdf.HmacSha512, Pim = 1, Quick = true,
+            });
+            throw new Exception("create accepted a disposed password");
+        }
+        catch (ObjectDisposedException) { /* expected */ }
+
+        if (File.Exists(scratch))
+            throw new Exception("a rejected create still created the container file");
+    });
+
+    using var volPw = SecurePassword.FromText("dispose-pw");
+    using var vol = Volume.Open(new VolumeOpenOptions
+    {
+        Path = p, Password = volPw, Kdf = VcKdf.HmacSha512, Pim = 1,
+    });
+
+    Check(36, "a leaked exFAT mount is reclaimed by the finalizer (8 drive slots)", () =>
+    {
+        // FatFs has FF_VOLUMES (8) drive slots. Before the mount became a
+        // SafeHandle, a discarded ExFatVolume kept its slot for the life of
+        // the process and the 9th mount failed with "all drive slots busy".
+        // Each iteration drops its mount and forces finalization, so a
+        // working finalizer keeps exactly one slot occupied here.
+        for (int i = 0; i < 12; i++)
+        {
+            LeakOneMount(vol);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+
+        using var again = VolumeFilesystem.Mount(vol);
+        again.WriteFile("\\still-mountable.txt", "slot reused"u8.ToArray());
+        if (Encoding.UTF8.GetString(again.ReadFile("\\still-mountable.txt")) != "slot reused")
+            throw new Exception("mount after finalizer reclaim lost its data");
+        Log("       12 leaked mounts reclaimed, the volume is still mountable");
+    });
+
+    Check(37, "ExFatVolume: double Dispose is safe, use after Dispose throws", () =>
+    {
+        var fs = VolumeFilesystem.Mount(vol);
+        fs.Dispose();
+        fs.Dispose();                       // idempotent: must not throw
+        try
+        {
+            fs.ListDirectory("\\");
+            throw new Exception("listing succeeded on a disposed mount");
+        }
+        catch (ObjectDisposedException) { /* expected */ }
+    });
+
+    // Deliberately unsafe on purpose: the mount is never disposed. Kept in a
+    // separate non-inlined method so the JIT cannot extend the lifetime of
+    // the reference past this call, which would hide the finalizer test.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void LeakOneMount(Volume volume)
+    {
+        var leaked = VolumeFilesystem.Mount(volume);
+        _ = leaked.GetSpace();              // prove it is a real, live mount
+    }
 });
 
 // ------------------------------------------------------------------- run all
