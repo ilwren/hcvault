@@ -131,7 +131,6 @@ jobs:
     # build already compiles win-x64 (avalonia-windows) and all Windows
     # architectures (package).
     name: native library (win-x64, compile gate)
-    if: github.event_name != 'workflow_dispatch'
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
