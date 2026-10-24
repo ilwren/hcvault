@@ -31,12 +31,18 @@ namespace VeraCrypt
 	VolumeCreator::VolumeCreator ()
 		: SizeDone (0),
 		Stage (ProgressStage::NotStarted),
-		mProgressInfo {false, 0, 0, ProgressStage::NotStarted}
+		mProgressInfo {false, 0, 0, ProgressStage::NotStarted},
+		CreationWorkerStarted (false)
 	{
 	}
 
 	VolumeCreator::~VolumeCreator ()
 	{
+		try
+		{
+			JoinCreationThread();
+		}
+		catch (...) { }
 	}
 
 	void VolumeCreator::Abort ()
@@ -44,8 +50,24 @@ namespace VeraCrypt
 		AbortRequested = true;
 	}
 
+	void VolumeCreator::JoinCreationThread ()
+	{
+		if (!CreationWorkerStarted)
+			return;
+
+		// Blocks until CreationThread() has returned. After mProgressInfo
+		// reports the run finished this is immediate; it also covers callers
+		// that destroy the creator while the worker is still winding down.
+		CreationWorker.Join();
+		CreationWorkerStarted = false;
+	}
+
 	void VolumeCreator::CheckResult ()
 	{
+		// Reap the worker first: its exit status (and, on POSIX, its stack
+		// mapping) is only released once the thread has been joined.
+		JoinCreationThread();
+
 		if (ThreadException)
 			ThreadException->Throw();
 	}
@@ -432,8 +454,11 @@ namespace VeraCrypt
 				VolumeCreator *Creator;
 			};
 
-			Thread thread;
-			thread.Start (new ThreadFunctor (this));
+			// Hand the work to the member thread so CheckResult()/the
+			// destructor can join it; a local Thread here was destroyed
+			// without Join/Detach and leaked the worker's stack.
+			CreationWorker.Start (new ThreadFunctor (this));
+			CreationWorkerStarted = true;
 		}
 		catch (...)
 		{

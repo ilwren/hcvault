@@ -60,19 +60,19 @@ int main (void)
     printf ("create ok (progress calls: %d)\n", g_progressCalls);
 
     /* --- open WITHOUT keyfiles must fail -------------------------------- */
-    vc_volume *bad = vc_open_volume (path, "passw0rd!", 9, NULL, 0, 10, 1, 0);
+    vc_volume *bad = vc_open_volume (path, "passw0rd!", 9, NULL, 0, 10, 1, 0, 0);
     if (bad) return Fail ("open without keyfiles should fail", 0);
 
     /* --- wrong PIM must fail -------------------------------------------- */
-    bad = vc_open_volume (path, "passw0rd!", 9, keyfiles, 2, 0, 1, 0);
+    bad = vc_open_volume (path, "passw0rd!", 9, keyfiles, 2, 0, 1, 0, 0);
     if (bad) return Fail ("open with default PIM should fail", 0);
 
     /* --- wrong password must fail ---------------------------------------- */
-    bad = vc_open_volume (path, "wrong", 5, keyfiles, 2, 10, 1, 0);
+    bad = vc_open_volume (path, "wrong", 5, keyfiles, 2, 10, 1, 0, 0);
     if (bad) return Fail ("wrong password accepted", 0);
 
     /* --- correct open ----------------------------------------------------- */
-    vc_volume *v = vc_open_volume (path, "passw0rd!", 9, keyfiles, 2, 10, 0, 0);
+    vc_volume *v = vc_open_volume (path, "passw0rd!", 9, keyfiles, 2, 10, 0, 0, 0);
     if (!v) return Fail ("open with keyfiles+pim", vc_last_error ());
     printf ("open ok: cipher=%s kdf=%s sector=%u data=%llu pim=%d hidden=%d\n",
         vc_get_cipher_used (v), vc_get_kdf_used (v), vc_get_sector_size (v),
@@ -107,11 +107,11 @@ int main (void)
     printf ("password change ok (-> Argon2, no keyfiles, default PIM)\n");
 
     /* old credentials must fail now */
-    bad = vc_open_volume (path, "passw0rd!", 9, keyfiles, 2, 10, 1, 0);
+    bad = vc_open_volume (path, "passw0rd!", 9, keyfiles, 2, 10, 1, 0, 0);
     if (bad) return Fail ("old credentials still work", 0);
 
     /* new credentials must work */
-    v = vc_open_volume (path, "new-pass-123", 12, NULL, 0, 0, 1, 0);
+    v = vc_open_volume (path, "new-pass-123", 12, NULL, 0, 0, 1, 0, 0);
     if (!v) return Fail ("open after change", vc_last_error ());
     if (strcmp (vc_get_kdf_used (v), "Argon2") != 0) return Fail ("kdf after change", vc_get_kdf_used (v));
     if (vc_read_sectors (v, rbuf, 0, 512) < 0) return Fail ("read after change", vc_last_error ());
@@ -132,7 +132,7 @@ int main (void)
         if (vc_create_volume (p, 1ULL * 1024 * 1024, "x", 1, NULL, 0,
             suites[i][0], suites[i][1], "NONE", 0, 1, 0, NULL, NULL) != VC_OK)
             return Fail (suites[i][0], vc_last_error ());
-        vc_volume *s = vc_open_volume (p, "x", 1, NULL, 0, 0, 0, 0);
+        vc_volume *s = vc_open_volume (p, "x", 1, NULL, 0, 0, 0, 0, 0);
         if (!s) return Fail (suites[i][0], vc_last_error ());
         if (vc_write_sectors (s, wbuf, 0, 512) != 512 || vc_read_sectors (s, rbuf, 0, 512) != 512
             || memcmp (wbuf, rbuf, 512) != 0)
@@ -150,8 +150,8 @@ int main (void)
     if (vc_create_volume (hp, 2ULL * 1024 * 1024, "inner-pw", 8, NULL, 0,
         "AES", "HMAC-SHA-512", "NONE", 0, 1, 1 /*hidden*/, NULL, NULL) != VC_OK)
         return Fail ("create hidden", vc_last_error ());
-    vc_volume *outer = vc_open_volume (hp, "outer-pw", 8, NULL, 0, 0, 0, 0);
-    vc_volume *inner = vc_open_volume (hp, "inner-pw", 8, NULL, 0, 0, 0, 0);
+    vc_volume *outer = vc_open_volume (hp, "outer-pw", 8, NULL, 0, 0, 0, 0, 0);
+    vc_volume *inner = vc_open_volume (hp, "inner-pw", 8, NULL, 0, 0, 0, 0, 0);
     if (!outer || !inner) return Fail ("open outer/inner", vc_last_error ());
     if (vc_is_hidden (outer) || !vc_is_hidden (inner)) return Fail ("hidden flag", 0);
     /* both views must be independently writable at overlapping offsets */
@@ -168,7 +168,7 @@ int main (void)
         "AES", "HMAC-SHA-512", "EXFAT", 0, 1, 0, NULL, NULL) != VC_OK)
         return Fail ("create exFAT volume", vc_last_error ());
 
-    vc_volume *xv = vc_open_volume (xp, "exfat-pw", 8, NULL, 0, 0, 0, 0);
+    vc_volume *xv = vc_open_volume (xp, "exfat-pw", 8, NULL, 0, 0, 0, 0, 0);
     if (!xv) return Fail ("open exFAT volume", vc_last_error ());
     vc_exfat *xf = vc_exfat_mount (xv);
     if (!xf) return Fail ("mount exFAT", vc_last_error ());

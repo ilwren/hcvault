@@ -13,12 +13,21 @@ namespace HCVault.Core.ExFat;
 ///   host filesystem. Volumes it creates are readable by VeraCrypt itself and
 ///   by Windows (exFAT "super-floppy", the layout VeraCrypt uses).
 /// </summary>
+/// <remarks>
+///   The mount is a <see cref="SafeHandle" />, so a forgotten
+///   <see cref="Dispose" /> is recovered by the finalizer instead of leaking
+///   the mount for the life of the process. That matters more than for a
+///   plain handle: the native side keeps the <c>Volume</c> alive through the
+///   mount state, so a leaked mount also pins the volume's file descriptor,
+///   and it occupies one of only <c>FF_VOLUMES</c> (8) FatFs drive slots -
+///   eight leaked mounts make every later mount fail with
+///   "all drive slots busy".
+/// </remarks>
 public sealed class ExFatVolume : IVolumeFileSystem
 {
-    private IntPtr _fs;
-    private bool _disposed;
+    private readonly ExFatMountHandle _mount;
 
-    private ExFatVolume(IntPtr fs) => _fs = fs;
+    private ExFatVolume(ExFatMountHandle mount) => _mount = mount;
 
     /// <summary>Mount the exFAT filesystem inside an open volume.</summary>
     public static ExFatVolume Mount(Volume volume)
@@ -29,7 +38,7 @@ public sealed class ExFatVolume : IVolumeFileSystem
         IntPtr fs = NativeMethods.vc_exfat_mount(volume.NativeHandle);
         if (fs == IntPtr.Zero)
             throw Status.ToException(NativeMethods.vc_last_status());
-        return new ExFatVolume(fs);
+        return new ExFatVolume(new ExFatMountHandle(fs));
     }
 
     /// <inheritdoc />
@@ -39,7 +48,7 @@ public sealed class ExFatVolume : IVolumeFileSystem
         ThrowIfDisposed();
 
         var list = new List<FatEntry>();
-        IntPtr dir = NativeMethods.vc_exfat_opendir(_fs, path);
+        IntPtr dir = NativeMethods.vc_exfat_opendir(Fs, path);
         if (dir == IntPtr.Zero)
             throw Status.ToException(NativeMethods.vc_last_status());
 
@@ -68,7 +77,7 @@ public sealed class ExFatVolume : IVolumeFileSystem
         ArgumentNullException.ThrowIfNull(path);
         ThrowIfDisposed();
 
-        IntPtr f = NativeMethods.vc_exfat_open(_fs, path, mode: 0);
+        IntPtr f = NativeMethods.vc_exfat_open(Fs, path, mode: 0);
         if (f == IntPtr.Zero)
             throw Status.ToException(NativeMethods.vc_last_status());
 
@@ -99,7 +108,7 @@ public sealed class ExFatVolume : IVolumeFileSystem
         ArgumentNullException.ThrowIfNull(path);
         ThrowIfDisposed();
 
-        IntPtr f = NativeMethods.vc_exfat_open(_fs, path, mode: 1);
+        IntPtr f = NativeMethods.vc_exfat_open(Fs, path, mode: 1);
         if (f == IntPtr.Zero)
             throw Status.ToException(NativeMethods.vc_last_status());
 
@@ -126,7 +135,7 @@ public sealed class ExFatVolume : IVolumeFileSystem
         ArgumentNullException.ThrowIfNull(path);
         ThrowIfDisposed();
 
-        IntPtr f = NativeMethods.vc_exfat_open(_fs, path, (int)mode);
+        IntPtr f = NativeMethods.vc_exfat_open(Fs, path, (int)mode);
         if (f == IntPtr.Zero)
             throw Status.ToException(NativeMethods.vc_last_status());
         return new ExFatFileStream(f, mode);
@@ -137,7 +146,7 @@ public sealed class ExFatVolume : IVolumeFileSystem
     {
         ArgumentNullException.ThrowIfNull(path);
         ThrowIfDisposed();
-        Status.ThrowIfFailed(NativeMethods.vc_exfat_mkdir(_fs, path));
+        Status.ThrowIfFailed(NativeMethods.vc_exfat_mkdir(Fs, path));
     }
 
     /// <inheritdoc />
@@ -145,14 +154,14 @@ public sealed class ExFatVolume : IVolumeFileSystem
     {
         ArgumentNullException.ThrowIfNull(path);
         ThrowIfDisposed();
-        Status.ThrowIfFailed(NativeMethods.vc_exfat_delete(_fs, path));
+        Status.ThrowIfFailed(NativeMethods.vc_exfat_delete(Fs, path));
     }
 
     /// <inheritdoc />
     public VolumeSpace GetSpace()
     {
         ThrowIfDisposed();
-        Status.ThrowIfFailed(NativeMethods.vc_exfat_get_space(_fs, out NativeMethods.VcExFatSpace s));
+        Status.ThrowIfFailed(NativeMethods.vc_exfat_get_space(Fs, out NativeMethods.VcExFatSpace s));
         return new VolumeSpace
         {
             TotalBytes = (long)s.TotalBytes,
@@ -162,20 +171,11 @@ public sealed class ExFatVolume : IVolumeFileSystem
     }
 
     /// <summary>Release the exFAT mount (the volume itself stays open).</summary>
-    public void Dispose()
-    {
-        if (!_disposed)
-        {
-            _disposed = true;
-            if (_fs != IntPtr.Zero)
-            {
-                NativeMethods.vc_exfat_unmount(_fs);
-                _fs = IntPtr.Zero;
-            }
-        }
-    }
+    public void Dispose() => _mount.Dispose();
 
-    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+    private IntPtr Fs => _mount.DangerousGetHandle();
+
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_mount.IsClosed, this);
 
     private static unsafe FatEntry ToFatEntry(NativeMethods.VcExFatEntry entry)
     {
@@ -195,5 +195,23 @@ public sealed class ExFatVolume : IVolumeFileSystem
             ModifiedUtc = FatDateTime.Decode(entry.ModifiedDate, entry.ModifiedTime),
             FirstCluster = 0, // not exposed by the exFAT bridge
         };
+    }
+
+    /// <summary>
+    ///   Owns the native mount. Releasing it unmounts, which also drops the
+    ///   native reference to the volume and frees the FatFs drive slot.
+    /// </summary>
+    private sealed class ExFatMountHandle : SafeHandle
+    {
+        public ExFatMountHandle(IntPtr handle) : base(IntPtr.Zero, ownsHandle: true)
+            => SetHandle(handle);
+
+        public override bool IsInvalid => handle == IntPtr.Zero;
+
+        protected override bool ReleaseHandle()
+        {
+            NativeMethods.vc_exfat_unmount(handle);
+            return true;
+        }
     }
 }

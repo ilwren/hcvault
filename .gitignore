@@ -1,6 +1,7 @@
 # Build outputs
 [Bb]uild/
-[Bb]uild-*/     # per-preset CMake dirs: build-local, build-android-<abi>, build-win-<arch>
+# per-preset CMake dirs: build-local, build-android-<abi>, build-win-<arch>
+[Bb]uild-*/
 [Oo]ut/
 bin/
 obj/

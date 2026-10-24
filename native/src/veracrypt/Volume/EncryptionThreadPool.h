@@ -104,7 +104,15 @@ namespace VeraCrypt
 	protected:
 		static void WorkThreadProc ();
 
-		static const size_t MaxThreadCount = 32;
+		// Worker count cap. The pool exists to (a) probe several candidate
+		// KDFs in parallel on auto-detect opens (at most 5 memory-light
+		// candidates + Argon2) and (b) fan out multi-sector crypto over
+		// modest write buffers. Eight workers saturate both; the upstream
+		// value of 32 burned 32 thread stacks - 256 MiB of VmData with the
+		// old 8 MiB stacks, still 16 MiB with the current 512 KiB ones -
+		// the moment the library initialised, which showed up as a huge
+		// "private memory" jump on first use.
+		static const size_t MaxThreadCount = 8;
 		static const size_t QueueSize = MaxThreadCount * 2;
 
 		static Mutex DequeueMutex;

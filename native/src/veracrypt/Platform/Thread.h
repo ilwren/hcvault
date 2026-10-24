@@ -37,8 +37,19 @@ namespace VeraCrypt
 		typedef pthread_t ThreadSystemHandle;
 		typedef void* (*ThreadProcPtr) (void *);
 #endif
-		Thread () { };
-		virtual ~Thread () { };
+		Thread () : SystemHandle (), Started (false), Reaped (false) { };
+		virtual ~Thread ()
+		{
+			// Safety net: an abandoned joinable thread keeps its stack
+			// reserved until it is joined or detached (POSIX), which is an
+			// 512 KiB VmData leak per thread. Detach releases it.
+			try
+			{
+				if (Started && !Reaped)
+					Detach();
+			}
+			catch (...) { }
+		};
 
 		void Join () const;
 		void Detach () const;
@@ -65,9 +76,19 @@ namespace VeraCrypt
 			return 0;
 		}
 
-		static const size_t MinThreadStackSize = 8 * 1024 * 1024;
+		// Worker threads run iterative crypto and I/O only - no deep call
+		// chains - so a small stack is enough. This MUST stay small: the
+		// encryption pool starts one worker per logical CPU (up to
+		// MaxThreadCount), and on Linux/Android every thread stack counts
+		// against VmData - which is exactly what .NET reports as
+		// Process.PrivateMemorySize64. Upstream's 8 MiB (sized for the GUI
+		// process) made the first pool start look like a ~256 MiB memory
+		// spike on a 32-CPU machine. 512 KiB keeps a full pool at 4 MiB.
+		static const size_t MinThreadStackSize = 512 * 1024;
 
 		ThreadSystemHandle SystemHandle;
+		bool Started;
+		mutable bool Reaped;
 
 	private:
 		Thread (const Thread &);

@@ -26,6 +26,12 @@ name: build-demos
 #   - hcvault              Python wheels (pure-ctypes wrapper; linux-x64,
 #                          Windows x64/x86/ARM64 and macOS arm64 (best
 #                          effort) native libraries bundled; not on PyPI)
+#
+# The two macOS jobs are best effort: GitHub sometimes cannot hand out a
+# hosted arm64 macOS runner and then cancels them. Their results never gate
+# the release (see the release job's `if:`), but such a run still ends red -
+# rerun just the cancelled jobs (Actions -> run -> "Re-run failed jobs") if
+# you want the macOS assets too.
 
 on:
   push:
@@ -116,6 +122,46 @@ jobs:
         with:
           name: native-linux-x64
           path: native/runtimes/linux-x64/native/
+
+  native-windows:
+    # Compile gate for the Windows half of the port. The Linux job never
+    # touches it, so a change to the Win32 code paths (CreateThread, the
+    # thread-handle lifetime in Thread::Join, File I/O, CNG RNG) used to be
+    # unverified until a release build. Runs only on push/PR: the release
+    # build already compiles win-x64 (avalonia-windows) and all Windows
+    # architectures (package).
+    name: native library (win-x64, compile gate)
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build native library (win-x64)
+        run: .\build.ps1 -Arch x64 -SkipManaged -NoDownload
+
+      - name: Verify the DLL and its C API exports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = 'native/runtimes/win-x64/native/hcvault-core.dll'
+          if (-not (Test-Path $dll)) { throw "missing $dll" }
+          $fi = Get-Item $dll
+          Write-Host ("{0}: {1:N0} bytes" -f $fi.Name, $fi.Length)
+          if ($fi.Length -lt 100KB) { throw "suspiciously small native library ($($fi.Length) bytes)" }
+
+          # the API surface the managed wrapper binds to must be exported;
+          # a missing VC_API/visibility macro shows up here, not at runtime
+          $bytes = [System.IO.File]::ReadAllBytes($fi.FullName)
+          $text = [System.Text.Encoding]::ASCII.GetString($bytes)
+          $required = @(
+            'vc_init', 'vc_shutdown', 'vc_create_volume', 'vc_open_volume',
+            'vc_close_volume', 'vc_read_sectors', 'vc_write_sectors',
+            'vc_change_password', 'vc_exfat_mount', 'vc_exfat_unmount'
+          )
+          $missing = @($required | Where-Object { -not $text.Contains($_) })
+          if ($missing.Count -gt 0) { throw "missing exports: $($missing -join ', ')" }
+          Write-Host "exports present: $($required -join ', ')"
 
   aot:
     name: AOT smoke + Avalonia demo (linux-x64)
@@ -297,6 +343,19 @@ jobs:
       - name: Build wheel
         run: python3 -m pip wheel python/ -w wheelhouse/ --no-deps
 
+      # a py3-none-any wheel means setup.py did not find the .so: the wheel
+      # would install everywhere and work nowhere (no bundled library)
+      - name: Verify the wheel bundles the native library
+        run: |
+          set -e
+          ls -l wheelhouse/
+          whl=$(ls wheelhouse/*.whl)
+          case "$(basename "$whl")" in
+            *-none-any.whl) echo "wheel did not bundle libhcvault-core.so: $whl"; exit 1 ;;
+            *-manylinux_*_x86_64.whl) ;;
+            *) echo "unexpected linux wheel tag: $whl"; exit 1 ;;
+          esac
+
       # prove the wheel is self-contained: install into a clean venv and run
       # the smoke test from outside the repository
       - name: Smoke test (clean venv)
@@ -367,8 +426,17 @@ jobs:
     timeout-minutes: 30
     # the macOS native library builds on the POSIX base but is otherwise
     # untested - a failure here must not block the release (it ships without
-    # a macOS wheel that time; the smoke test below gates what does ship)
+    # a macOS wheel that time; the smoke test below gates what does ship).
+    # NOTE: `continue-on-error` does not cover a job whose runner was never
+    # acquired - GitHub cancels it and the run goes red. The release job
+    # therefore checks only the required jobs (see its `if:`).
     continue-on-error: true
+    env:
+      # tag the wheel with the deployment target, not with the runner's macOS
+      # version (sysconfig reported macosx_26_0_arm64 for 1.6.3, which pip
+      # will not install on any older macOS). CMake gets the same value so the
+      # dylib and the tag cannot disagree.
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
       - uses: actions/checkout@v4
 
@@ -381,6 +449,20 @@ jobs:
 
       - name: Build wheel
         run: python3 -m pip wheel python/ -w wheelhouse/ --no-deps
+
+      # guards the deployment-target tag: sysconfig.get_platform() used to
+      # tag the wheel with the runner's macOS version (macosx_26_0_arm64 for
+      # 1.6.3), which pip refuses to install anywhere older
+      - name: Verify the wheel tag is the deployment target
+        run: |
+          set -e
+          ls -l wheelhouse/
+          whl=$(ls wheelhouse/*.whl)
+          expected="macosx_$(printf '%s' "$MACOSX_DEPLOYMENT_TARGET" | tr '.' '_')_arm64"
+          case "$(basename "$whl")" in
+            *-"$expected".whl) echo "wheel tag ok: $expected" ;;
+            *) echo "unexpected wheel tag: $whl (expected $expected)"; exit 1 ;;
+          esac
 
       - name: Smoke test (clean venv)
         run: |
@@ -489,13 +571,41 @@ jobs:
 
   release:
     name: GitHub Release
-    if: github.event_name == 'workflow_dispatch'
+    # `needs` lists every job so the release is assembled after all of them,
+    # but only the REQUIRED ones are checked here. The two macOS jobs are
+    # best effort: when GitHub cannot hand out a hosted arm64 macOS runner it
+    # cancels them ("The job was not acquired by Runner of type hosted"), and
+    # a cancelled dependency skips this job even though those jobs are marked
+    # continue-on-error. That is what left 1.6.4 unpublished while every
+    # required asset had already been built. `always()` plus explicit checks
+    # keeps a real failure blocking the release, while a missing macOS runner
+    # only costs the optional macOS assets (the collector already tolerates
+    # their absence).
+    if: |
+      always() && github.event_name == 'workflow_dispatch' &&
+      needs.native-linux.result == 'success' &&
+      needs.aot.result == 'success' &&
+      needs.android.result == 'success' &&
+      needs.package.result == 'success' &&
+      needs.avalonia-windows.result == 'success' &&
+      needs.python-wheel-linux.result == 'success' &&
+      needs.python-wheel-windows.result == 'success'
     needs: [avalonia-windows, native-linux, aot, android, package, python-wheel-linux, python-wheel-windows, python-wheel-macos, avalonia-macos]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: write        # create the release and upload its assets
     steps:
+      - name: Report best-effort macOS job results
+        # visibility only: these two never gate the release
+        run: |
+          echo "macOS wheel job: ${{ needs.python-wheel-macos.result }}"
+          echo "macOS demo job:  ${{ needs.avalonia-macos.result }}"
+          if [ "${{ needs.python-wheel-macos.result }}" != "success" ] \
+             || [ "${{ needs.avalonia-macos.result }}" != "success" ]; then
+            echo "note: releasing without the optional macOS assets (see the log above)"
+          fi
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts    # one subfolder per artifact name
