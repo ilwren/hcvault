@@ -112,6 +112,27 @@ follows semantic versioning.
   join/detach. Ten create/open/write cycles now hold at 2.4 MB of VmData
   instead of growing by 8 MB each.
 
+- **Fixed: a forgotten `Dispose()` leaked handles that the GC could not
+  reclaim.** `ExFatVolume` kept its mount in a bare `IntPtr` and
+  `SecurePassword` pinned its bytes through a `GCHandle`; neither had a
+  finalizer (nor a `SafeHandle`), so an instance that was never disposed held
+  its resource until the process exited. For the mount that is worse than a
+  handle: the native mount state keeps the `Volume` alive (so the container
+  file stays open) and occupies one of only `FF_VOLUMES` (8) FatFs drive
+  slots - eight leaked mounts make every later mount fail with "all drive
+  slots busy", including mounts of unrelated volumes. A pinned `GCHandle` is
+  a GC root as well, so the password array could never be collected.
+  `ExFatVolume` now owns a `SafeHandle` and `SecurePassword` has a finalizer;
+  both keep the deterministic wipe/unmount on `Dispose()`, and `Dispose()` is
+  idempotent. Using either after `Dispose()` now throws
+  `ObjectDisposedException` instead of silently touching freed state.
+
+- **Fixed: a failed `vc_exfat_mount` leaked its handle.** The C API allocated
+  the `vc_exfat` wrapper before calling into FatFs, so a rejection (no free
+  drive slot, corrupt exFAT) leaked the allocation - and the caller could not
+  free it, having only received `nullptr`. The handle is now built after the
+  mount succeeds.
+
 - **Fixed: the native test suite did not compile against the current ABI.**
   `native/tests/vcapi_tests.c` still called `vc_open_volume` with the
   pre-`kdf_name` signature. All calls pass the kdf now (NULL = auto-detect,
